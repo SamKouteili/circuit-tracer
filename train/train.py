@@ -14,8 +14,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from train.dataset import create_datasets_from_huggingface, create_data_loaders
-from train.models import PromptInjectionGraphGPS
+import sys
+from pathlib import Path
+
+# Add the circuit-tracer directory to Python path
+circuit_tracer_root = Path(__file__).parent.parent
+sys.path.insert(0, str(circuit_tracer_root))
+
+# Also add current directory to path for when run from train/ directory
+sys.path.insert(0, str(Path(__file__).parent))
+
+try:
+    from train.dataset import create_datasets_from_huggingface, create_data_loaders
+    from train.models import PromptInjectionGraphGPS
+except ImportError:
+    # Fallback: try importing without train prefix
+    from dataset import create_datasets_from_huggingface, create_data_loaders
+    from models import PromptInjectionGraphGPS
 
 class EarlyStopping:
     """Early stopping to prevent overfitting"""
