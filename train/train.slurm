@@ -5,18 +5,19 @@
 #SBATCH --mail-type=ALL
 
 #SBATCH --job-name=training
-#SBATCH --time=40:00:00
-#SBATCH --mem=40G
+#SBATCH --time=8:00:00
+#SBATCH --mem=16G
 #SBATCH --partition=gpu
 #SBATCH --gpus=1
 #SBATCH --constraint=a100-40g
 #SBATCH --cpus-per-gpu=2
-
 
 module purge
 module load miniconda
 conda activate circuit
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-export TOKENIZERS_PARALLELISM=true
-python gendata.py
+export TOKENIZERS_PARALLELISM=false
+
+# Run training with the large dataset - small model, reasonable resources
+python train.py --dataset samkouteili/injection-attribution-graphs --epochs 100 --batch_size 16 --lr 0.001
