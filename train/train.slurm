@@ -14,25 +14,26 @@
 
 module purge
 module load miniconda
-
-# Debug: Show what's available
-echo "=== DEBUG INFO ==="
-echo "CONDA_EXE: $CONDA_EXE"
-echo "Available conda environments:"
-conda env list
-
-# Try to activate circuit environment
-echo "Activating circuit environment..."
 conda activate circuit
 
-# Debug: Check if activation worked
-echo "CONDA_DEFAULT_ENV: $CONDA_DEFAULT_ENV"
+# Debug: Check what's actually installed in circuit environment
+echo "=== ENVIRONMENT DEBUG ==="
 echo "Python path: $(which python)"
-echo "Python version: $(python --version)"
+echo "Python executable: $(python -c 'import sys; print(sys.executable)')"
+echo "Checking installed packages..."
+python -m pip list | grep -E "(torch|numpy|sklearn|geometric)" || echo "No ML packages found"
 
-# Test torch import
-echo "Testing torch import..."
-python -c "import torch; print(f'PyTorch version: {torch.__version__}'); print('torch import successful')" || echo "torch import failed"
+# Test imports one by one
+echo "Testing individual imports..."
+python -c "import torch; print('torch OK')" || echo "torch FAILED"
+python -c "import numpy; print('numpy OK')" || echo "numpy FAILED" 
+python -c "import sklearn; print('sklearn OK')" || echo "sklearn FAILED"
+
+# Try installing requirements if torch fails
+if ! python -c "import torch" 2>/dev/null; then
+    echo "torch not found, installing requirements..."
+    pip install -r requirements.txt
+fi
 
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TOKENIZERS_PARALLELISM=false
