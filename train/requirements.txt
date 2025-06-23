@@ -1,0 +1,19 @@
+# Training requirements for prompt injection detection using GraphGPS
+# Core deep learning framework
+torch>=2.0.0
+
+# Graph neural networks
+torch-geometric>=2.3.0
+
+# Scientific computing
+numpy>=1.21.0
+
+# Machine learning utilities (provides sklearn module)
+scikit-learn>=1.0.0
+
+# Hugging Face ecosystem for dataset loading
+huggingface-hub>=0.15.0
+datasets>=2.10.0
+
+# HTTP requests for dataset downloading
+requests>=2.25.0
