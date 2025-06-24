@@ -7,6 +7,7 @@ from torch_geometric.data import Dataset, DataLoader, Data
 from sklearn.model_selection import train_test_split
 from typing import List, Tuple, Optional
 import os
+from tqdm import tqdm
 try:
     from train.data_converter import AttributionGraphConverter
 except ImportError:
@@ -175,7 +176,7 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
                         'injected': {'success': 0, 'failed': 0}}
 
     # Process benign files (label=0)
-    for file_path in benign_files:
+    for file_path in tqdm(benign_files, desc="Processing benign files", unit="file"):
         try:
             import json as json_module
             with open(file_path, 'r') as f:
@@ -189,17 +190,17 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
                 else:
                     conversion_stats['benign']['failed'] += 1
         except Exception as e:
-            print(f"Error processing {file_path}: {e}")
+            tqdm.write(f"Error processing {file_path}: {e}")
             # Debug: check file size
             try:
                 file_size = os.path.getsize(file_path)
-                print(f"  File size: {file_size} bytes")
+                tqdm.write(f"  File size: {file_size} bytes")
             except:
                 pass
             conversion_stats['benign']['failed'] += 1
 
     # Process injected files (label=1)
-    for file_path in injected_files:
+    for file_path in tqdm(injected_files, desc="Processing injected files", unit="file"):
         try:
             import json as json_module
             with open(file_path, 'r') as f:
@@ -213,11 +214,11 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
                 else:
                     conversion_stats['injected']['failed'] += 1
         except Exception as e:
-            print(f"Error processing {file_path}: {e}")
+            tqdm.write(f"Error processing {file_path}: {e}")
             # Debug: check file size
             try:
                 file_size = os.path.getsize(file_path)
-                print(f"  File size: {file_size} bytes")
+                tqdm.write(f"  File size: {file_size} bytes")
             except:
                 pass
             conversion_stats['injected']['failed'] += 1
