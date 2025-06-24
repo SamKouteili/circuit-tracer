@@ -55,18 +55,19 @@ class AttributionGraphConverter:
         
         return len(self.node_vocab) > 0
     
-    def build_vocabulary_from_json_strings(self, json_strings: List[str]):
-        """Build vocabulary from list of JSON strings"""
+    def build_vocabulary_from_json_strings(self, json_strings):
+        """Build vocabulary from iterable of JSON strings (can be generator for memory efficiency)"""
         all_nodes = set()
         
-        print(f"Building vocabulary from {len(json_strings)} JSON strings...")
+        print(f"Building vocabulary from JSON strings...")
         
         for i, json_string in enumerate(json_strings):
             try:
                 graph_data = json.loads(json_string)
                 
                 if 'nodes' not in graph_data:
-                    print(f"Warning: No 'nodes' key in JSON string {i}, skipping...")
+                    if i < 10:  # Only show first 10 warnings to avoid spam
+                        print(f"Warning: No 'nodes' key in JSON string {i}, skipping...")
                     continue
                 
                 for node in graph_data['nodes']:
@@ -75,8 +76,13 @@ class AttributionGraphConverter:
                         all_nodes.add(node_id)
                         
             except Exception as e:
-                print(f"Error processing JSON string {i}: {e}")
+                if i < 10:  # Only show first 10 errors to avoid spam
+                    print(f"Error processing JSON string {i}: {e}")
                 continue
+            
+            # Progress indicator for large datasets
+            if (i + 1) % 1000 == 0:
+                print(f"Processed {i + 1} strings, found {len(all_nodes)} unique nodes so far...")
         
         # Create mapping: node_id -> integer index
         self.node_vocab = {node_id: idx for idx, node_id in enumerate(sorted(all_nodes))}
