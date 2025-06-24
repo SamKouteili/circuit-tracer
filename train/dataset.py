@@ -2,11 +2,15 @@
 Clean dataset classes and data loading utilities for prompt injection detection
 """
 
+import torch
 from torch_geometric.data import Dataset, DataLoader, Data
 from sklearn.model_selection import train_test_split
 from typing import List, Tuple, Optional
 import os
-from train.data_converter import AttributionGraphConverter
+try:
+    from train.data_converter import AttributionGraphConverter
+except ImportError:
+    from data_converter import AttributionGraphConverter
 
 
 class PromptInjectionDataset(Dataset):
