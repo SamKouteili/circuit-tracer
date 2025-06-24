@@ -151,6 +151,16 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
                 all_json_strings.append(converted_data['json'])
         except Exception as e:
             print(f"Warning: Could not load {file_path}: {e}")
+            # Debug: check file size
+            try:
+                file_size = os.path.getsize(file_path)
+                print(f"  File size: {file_size} bytes")
+                if file_size == 0:
+                    print("  -> Empty file!")
+                elif file_size < 10:
+                    print("  -> Very small file, likely corrupted")
+            except:
+                print("  -> Could not check file size")
 
     # Build vocabulary from JSON strings
     vocab_success = converter.build_vocabulary_from_json_strings(
@@ -180,6 +190,12 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
                     conversion_stats['benign']['failed'] += 1
         except Exception as e:
             print(f"Error processing {file_path}: {e}")
+            # Debug: check file size
+            try:
+                file_size = os.path.getsize(file_path)
+                print(f"  File size: {file_size} bytes")
+            except:
+                pass
             conversion_stats['benign']['failed'] += 1
 
     # Process injected files (label=1)
@@ -198,6 +214,12 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
                     conversion_stats['injected']['failed'] += 1
         except Exception as e:
             print(f"Error processing {file_path}: {e}")
+            # Debug: check file size
+            try:
+                file_size = os.path.getsize(file_path)
+                print(f"  File size: {file_size} bytes")
+            except:
+                pass
             conversion_stats['injected']['failed'] += 1
 
     print(f"Conversion results:")
