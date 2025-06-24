@@ -81,48 +81,50 @@ def create_datasets_from_local_directory(
 ) -> Tuple[PromptInjectionDataset, PromptInjectionDataset, PromptInjectionDataset, AttributionGraphConverter]:
     """
     Create datasets from local directory with benign/ and injected/ subdirectories
-    
+
     Args:
         dataset_path: Path to directory containing benign/ and injected/ subdirectories
         test_size: Fraction of data to use for testing
         val_size: Fraction of remaining data to use for validation
         random_state: Random seed for reproducibility
-        
+
     Returns:
         Tuple of (train_dataset, val_dataset, test_dataset, converter)
     """
-    
+
     from pathlib import Path
-    
+
     dataset_dir = Path(dataset_path)
     if not dataset_dir.exists() or not dataset_dir.is_dir():
-        raise ValueError(f"Dataset directory {dataset_path} does not exist or is not a directory")
-    
+        raise ValueError(
+            f"Dataset directory {dataset_path} does not exist or is not a directory")
+
     # Find benign and injected subdirectories
     benign_dir = dataset_dir / "benign"
     injected_dir = dataset_dir / "injected"
-    
+
     if not benign_dir.exists():
         raise ValueError(f"Benign directory {benign_dir} not found")
     if not injected_dir.exists():
         raise ValueError(f"Injected directory {injected_dir} not found")
-    
+
     # Collect all JSON files
     benign_files = list(benign_dir.glob("*.json"))
     injected_files = list(injected_dir.glob("*.json"))
-    
+
     if not benign_files:
         raise ValueError(f"No JSON files found in {benign_dir}")
     if not injected_files:
         raise ValueError(f"No JSON files found in {injected_dir}")
-    
+
     print(f"Loading from local directory: {dataset_path}")
-    print(f"Found {len(benign_files)} benign and {len(injected_files)} injected files")
-    
+    print(
+        f"Found {len(benign_files)} benign and {len(injected_files)} injected files")
+
     # Convert to string paths and use existing function
     benign_file_paths = [str(f) for f in benign_files]
     injected_file_paths = [str(f) for f in injected_files]
-    
+
     return create_datasets_from_converted_files(
         benign_files=benign_file_paths,
         injected_files=injected_file_paths,
@@ -130,6 +132,7 @@ def create_datasets_from_local_directory(
         val_size=val_size,
         random_state=random_state
     )
+
 
 def create_datasets_from_converted_files(benign_files, injected_files, test_size=0.2, val_size=0.1, random_state=42):
     """Create datasets from converted files that have JSON strings"""
@@ -164,6 +167,10 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
                 print("  -> Could not check file size")
 
     # Build vocabulary from JSON strings
+
+    print(
+        f"[dataset] Building vocabulary from {len(all_json_strings)} JSON strings...")
+
     vocab_success = converter.build_vocabulary_from_json_strings(
         all_json_strings)
 
@@ -246,31 +253,24 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
         raise ValueError(
             "Dataset must contain both benign and injected graphs!")
 
-    # Split data
-    if len(all_data) < 3:
-        print("Warning: Very small dataset, using simple split")
-        train_data = all_data[:-1] if len(all_data) > 1 else all_data
-        val_data = []
-        test_data = all_data[-1:] if len(all_data) > 1 else []
-    else:
-        # Stratified splits to maintain class balance
-        train_val_data, test_data, train_val_labels, test_labels = train_test_split(
-            all_data, labels,
-            test_size=test_size,
-            stratify=labels,
+    # Stratified splits to maintain class balance
+    train_val_data, test_data, train_val_labels, test_labels = train_test_split(
+        all_data, labels,
+        test_size=test_size,
+        stratify=labels,
+        random_state=random_state
+    )
+
+    if len(train_val_data) > 2 and val_size > 0:
+        train_data, val_data, _, _ = train_test_split(
+            train_val_data, train_val_labels,
+            test_size=val_size / (1 - test_size),
+            stratify=train_val_labels,
             random_state=random_state
         )
-
-        if len(train_val_data) > 2 and val_size > 0:
-            train_data, val_data, _, _ = train_test_split(
-                train_val_data, train_val_labels,
-                test_size=val_size / (1 - test_size),
-                stratify=train_val_labels,
-                random_state=random_state
-            )
-        else:
-            train_data = train_val_data
-            val_data = []
+    else:
+        train_data = train_val_data
+        val_data = []
 
     # Create datasets
     train_dataset = PromptInjectionDataset(train_data)
