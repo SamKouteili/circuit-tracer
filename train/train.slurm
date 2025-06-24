@@ -5,8 +5,8 @@
 #SBATCH --mail-type=ALL
 
 #SBATCH --job-name=training
-#SBATCH --time=8:00:00
-#SBATCH --mem=16G
+#SBATCH --time=24:00:00
+#SBATCH --mem=40G
 #SBATCH --partition=gpu
 #SBATCH --gpus=1
 #SBATCH --constraint=a100-40g
@@ -40,4 +40,4 @@ export TOKENIZERS_PARALLELISM=false
 
 echo "=== STARTING TRAINING ==="
 # Run training with the large dataset - small model, reasonable resources
-python train.py --dataset samkouteili/injection-attribution-graphs --epochs 100 --batch_size 16 --lr 0.001
+python train.py --dataset samkouteili/injection-attribution-graphs --epochs 100 --batch_size 16 --lr 0.001 --output_dir ./hf_training_output
