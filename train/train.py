@@ -25,11 +25,11 @@ sys.path.insert(0, str(circuit_tracer_root))
 sys.path.insert(0, str(Path(__file__).parent))
 
 try:
-    from train.dataset import create_datasets_from_huggingface, create_data_loaders
+    from train.dataset import create_datasets_from_huggingface, create_datasets_from_local_directory, create_data_loaders
     from train.models import PromptInjectionGraphGPS
 except ImportError:
     # Fallback: try importing without train prefix
-    from dataset import create_datasets_from_huggingface, create_data_loaders
+    from dataset import create_datasets_from_huggingface, create_datasets_from_local_directory, create_data_loaders
     from models import PromptInjectionGraphGPS
 
 class EarlyStopping:
@@ -263,12 +263,21 @@ def main():
     print(f"\n1️⃣ Loading datasets...")
     start_time = time.time()
     
-    train_dataset, val_dataset, test_dataset, converter = create_datasets_from_huggingface(
-        dataset_name=args.dataset,
-        test_size=args.test_size,
-        val_size=args.val_size,
-        random_state=args.seed
-    )
+    # Check if dataset is a local directory or HuggingFace dataset
+    if os.path.exists(args.dataset) and os.path.isdir(args.dataset):
+        train_dataset, val_dataset, test_dataset, converter = create_datasets_from_local_directory(
+            dataset_path=args.dataset,
+            test_size=args.test_size,
+            val_size=args.val_size,
+            random_state=args.seed
+        )
+    else:
+        train_dataset, val_dataset, test_dataset, converter = create_datasets_from_huggingface(
+            dataset_name=args.dataset,
+            test_size=args.test_size,
+            val_size=args.val_size,
+            random_state=args.seed
+        )
     
     load_time = time.time() - start_time
     print(f"✅ Datasets loaded in {load_time:.2f}s")

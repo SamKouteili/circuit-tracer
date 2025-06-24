@@ -72,6 +72,64 @@ def create_datasets_from_huggingface(
     )
 
 
+def create_datasets_from_local_directory(
+    dataset_path: str,
+    test_size: float = 0.2,
+    val_size: float = 0.1,
+    random_state: int = 42
+) -> Tuple[PromptInjectionDataset, PromptInjectionDataset, PromptInjectionDataset, AttributionGraphConverter]:
+    """
+    Create datasets from local directory with benign/ and injected/ subdirectories
+    
+    Args:
+        dataset_path: Path to directory containing benign/ and injected/ subdirectories
+        test_size: Fraction of data to use for testing
+        val_size: Fraction of remaining data to use for validation
+        random_state: Random seed for reproducibility
+        
+    Returns:
+        Tuple of (train_dataset, val_dataset, test_dataset, converter)
+    """
+    
+    from pathlib import Path
+    
+    dataset_dir = Path(dataset_path)
+    if not dataset_dir.exists() or not dataset_dir.is_dir():
+        raise ValueError(f"Dataset directory {dataset_path} does not exist or is not a directory")
+    
+    # Find benign and injected subdirectories
+    benign_dir = dataset_dir / "benign"
+    injected_dir = dataset_dir / "injected"
+    
+    if not benign_dir.exists():
+        raise ValueError(f"Benign directory {benign_dir} not found")
+    if not injected_dir.exists():
+        raise ValueError(f"Injected directory {injected_dir} not found")
+    
+    # Collect all JSON files
+    benign_files = list(benign_dir.glob("*.json"))
+    injected_files = list(injected_dir.glob("*.json"))
+    
+    if not benign_files:
+        raise ValueError(f"No JSON files found in {benign_dir}")
+    if not injected_files:
+        raise ValueError(f"No JSON files found in {injected_dir}")
+    
+    print(f"Loading from local directory: {dataset_path}")
+    print(f"Found {len(benign_files)} benign and {len(injected_files)} injected files")
+    
+    # Convert to string paths and use existing function
+    benign_file_paths = [str(f) for f in benign_files]
+    injected_file_paths = [str(f) for f in injected_files]
+    
+    return create_datasets_from_converted_files(
+        benign_files=benign_file_paths,
+        injected_files=injected_file_paths,
+        test_size=test_size,
+        val_size=val_size,
+        random_state=random_state
+    )
+
 def create_datasets_from_converted_files(benign_files, injected_files, test_size=0.2, val_size=0.1, random_state=42):
     """Create datasets from converted files that have JSON strings"""
 
