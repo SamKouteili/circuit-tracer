@@ -137,7 +137,8 @@ def create_datasets_from_local_directory(
 def create_datasets_from_converted_files(benign_files, injected_files, test_size=0.2, val_size=0.1, random_state=42):
     """Create datasets from converted files that have JSON strings - memory efficient version"""
 
-    print(f"Creating datasets from {len(benign_files)} benign and {len(injected_files)} injected converted files...")
+    print(
+        f"Creating datasets from {len(benign_files)} benign and {len(injected_files)} injected converted files...")
     print("Using memory-efficient streaming approach...")
 
     # Initialize converter
@@ -145,34 +146,62 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
 
     # PASS 1: Build vocabulary efficiently by streaming through files
     print("Pass 1: Building vocabulary from files...")
-    
+
     def json_string_generator():
         """Generator that yields JSON strings without storing them all in memory"""
-        all_files = [(f, 'benign') for f in benign_files] + [(f, 'injected') for f in injected_files]
+        all_files = [(f, 'benign') for f in benign_files] + \
+            [(f, 'injected') for f in injected_files]
         
+        successful_files = 0
+        failed_files = 0
+
         for file_path, file_type in tqdm(all_files, desc="Reading files for vocabulary", unit="file"):
             try:
                 import json as json_module
+                
+                # Check file size first - skip files that are too large or empty
+                file_size = os.path.getsize(file_path)
+                if file_size == 0:
+                    failed_files += 1
+                    continue
+                elif file_size > 50 * 1024 * 1024:  # Skip files larger than 50MB (likely corrupted)
+                    tqdm.write(f"Skipping large file {file_path}: {file_size / 1024 / 1024:.1f}MB")
+                    failed_files += 1
+                    continue
+                
                 with open(file_path, 'r') as f:
-                    converted_data = json_module.load(f)
-                if 'json' in converted_data:
-                    yield converted_data['json']
+                    data = json_module.load(f)
+                
+                # Handle both converted format and raw attribution graphs
+                if 'json' in data:
+                    # Converted format: {"json": "stringified_attribution_graph"}
+                    yield data['json']
+                    successful_files += 1
+                elif 'nodes' in data and 'links' in data:
+                    # Raw attribution graph format: {"nodes": [...], "links": [...]}
+                    yield json_module.dumps(data)
+                    successful_files += 1
+                else:
+                    # Unknown format
+                    failed_files += 1
+                    if failed_files <= 5:  # Only show first 5 format errors
+                        tqdm.write(f"Unknown file format in {file_path}: keys = {list(data.keys())}")
+                        
+            except json.JSONDecodeError as e:
+                failed_files += 1
+                if failed_files <= 5:  # Only show first 5 JSON errors
+                    tqdm.write(f"JSON decode error in {file_path}: {str(e)[:100]}...")
             except Exception as e:
-                tqdm.write(f"Warning: Could not load {file_path}: {e}")
-                # Debug: check file size
-                try:
-                    file_size = os.path.getsize(file_path)
-                    tqdm.write(f"  File size: {file_size} bytes")
-                    if file_size == 0:
-                        tqdm.write("  -> Empty file!")
-                    elif file_size < 10:
-                        tqdm.write("  -> Very small file, likely corrupted")
-                except:
-                    tqdm.write("  -> Could not check file size")
+                failed_files += 1
+                if failed_files <= 5:  # Only show first 5 other errors
+                    tqdm.write(f"Error loading {file_path}: {str(e)[:100]}...")
+        
+        tqdm.write(f"Vocabulary building: {successful_files} successful, {failed_files} failed files")
 
     # Build vocabulary using generator (doesn't store all strings in memory)
-    vocab_success = converter.build_vocabulary_from_json_strings(json_string_generator())
-    
+    vocab_success = converter.build_vocabulary_from_json_strings(
+        json_string_generator())
+
     if not vocab_success:
         raise ValueError("Failed to build vocabulary from converted files")
 
@@ -186,38 +215,72 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
     for file_path in tqdm(benign_files, desc="Converting benign files", unit="file"):
         try:
             import json as json_module
+            
+            # Skip problematic files
+            file_size = os.path.getsize(file_path)
+            if file_size == 0 or file_size > 50 * 1024 * 1024:
+                conversion_stats['benign']['failed'] += 1
+                continue
+            
             with open(file_path, 'r') as f:
-                converted_data = json_module.load(f)
-            if 'json' in converted_data:
-                # Convert immediately and discard JSON string
-                data = converter.json_string_to_pyg_data(converted_data['json'], label=0)
+                file_data = json_module.load(f)
+            
+            # Handle both formats
+            json_string = None
+            if 'json' in file_data:
+                # Converted format
+                json_string = file_data['json']
+            elif 'nodes' in file_data and 'links' in file_data:
+                # Raw attribution graph format
+                json_string = json_module.dumps(file_data)
+            
+            if json_string:
+                data = converter.json_string_to_pyg_data(json_string, label=0)
                 if data is not None:
                     all_data.append(data)
                     conversion_stats['benign']['success'] += 1
                 else:
                     conversion_stats['benign']['failed'] += 1
-                # JSON string is automatically garbage collected here
-        except Exception as e:
-            tqdm.write(f"Error processing {file_path}: {e}")
+            else:
+                conversion_stats['benign']['failed'] += 1
+                
+        except (json.JSONDecodeError, Exception) as e:
             conversion_stats['benign']['failed'] += 1
 
     # Process injected files (label=1)
     for file_path in tqdm(injected_files, desc="Converting injected files", unit="file"):
         try:
             import json as json_module
+            
+            # Skip problematic files
+            file_size = os.path.getsize(file_path)
+            if file_size == 0 or file_size > 50 * 1024 * 1024:
+                conversion_stats['injected']['failed'] += 1
+                continue
+            
             with open(file_path, 'r') as f:
-                converted_data = json_module.load(f)
-            if 'json' in converted_data:
-                # Convert immediately and discard JSON string
-                data = converter.json_string_to_pyg_data(converted_data['json'], label=1)
+                file_data = json_module.load(f)
+            
+            # Handle both formats
+            json_string = None
+            if 'json' in file_data:
+                # Converted format
+                json_string = file_data['json']
+            elif 'nodes' in file_data and 'links' in file_data:
+                # Raw attribution graph format
+                json_string = json_module.dumps(file_data)
+            
+            if json_string:
+                data = converter.json_string_to_pyg_data(json_string, label=1)
                 if data is not None:
                     all_data.append(data)
                     conversion_stats['injected']['success'] += 1
                 else:
                     conversion_stats['injected']['failed'] += 1
-                # JSON string is automatically garbage collected here
-        except Exception as e:
-            tqdm.write(f"Error processing {file_path}: {e}")
+            else:
+                conversion_stats['injected']['failed'] += 1
+                
+        except (json.JSONDecodeError, Exception) as e:
             conversion_stats['injected']['failed'] += 1
 
     print(f"Conversion results:")
@@ -251,23 +314,16 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
         random_state=random_state
     )
 
-    if len(train_val_data) > 2 and val_size > 0:
-        train_data, val_data, _, _ = train_test_split(
-            train_val_data, train_val_labels,
-            test_size=val_size / (1 - test_size),
-            stratify=train_val_labels,
-            random_state=random_state
-        )
-    else:
-        train_data = train_val_data
-        val_data = []
-
+    train_data, val_data, _, _ = train_test_split(
+        train_val_data, train_val_labels,
+        test_size=val_size / (1 - test_size),
+        stratify=train_val_labels,
+        random_state=random_state
+    )
     # Create datasets
     train_dataset = PromptInjectionDataset(train_data)
-    val_dataset = PromptInjectionDataset(
-        val_data) if val_data else PromptInjectionDataset([])
-    test_dataset = PromptInjectionDataset(
-        test_data) if test_data else PromptInjectionDataset([])
+    val_dataset = PromptInjectionDataset(val_data)
+    test_dataset = PromptInjectionDataset(test_data)
 
     print(f"Dataset splits:")
     print(f"  Train: {len(train_dataset)} graphs")
