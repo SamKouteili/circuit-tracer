@@ -230,6 +230,8 @@ def main():
                        help='Number of data loader workers')
     parser.add_argument('--output_dir', type=str, default='./training_output',
                        help='Output directory for checkpoints and logs')
+    parser.add_argument('--cache_dir', type=str, default='./cache',
+                       help='Directory for caching vocabulary and datasets')
     parser.add_argument('--seed', type=int, default=42,
                        help='Random seed')
     
@@ -249,6 +251,11 @@ def main():
     
     print(f"🚀 Starting training on {device}")
     print(f"Arguments: {vars(args)}")
+    print(f"📁 Cache directory: {args.cache_dir}")
+    
+    # Create cache directory
+    cache_dir = Path(args.cache_dir)
+    cache_dir.mkdir(parents=True, exist_ok=True)
     
     # Create output directory
     output_dir = Path(args.output_dir)
@@ -269,14 +276,16 @@ def main():
             dataset_path=args.dataset,
             test_size=args.test_size,
             val_size=args.val_size,
-            random_state=args.seed
+            random_state=args.seed,
+            cache_dir=args.cache_dir
         )
     else:
         train_dataset, val_dataset, test_dataset, converter = create_datasets_from_huggingface(
             dataset_name=args.dataset,
             test_size=args.test_size,
             val_size=args.val_size,
-            random_state=args.seed
+            random_state=args.seed,
+            cache_dir=args.cache_dir
         )
     
     load_time = time.time() - start_time

@@ -89,6 +89,35 @@ class AttributionGraphConverter:
         print(f"Built vocabulary with {len(self.node_vocab)} unique nodes")
         
         return len(self.node_vocab) > 0
+    
+    def save_vocabulary(self, filepath: str):
+        """Save vocabulary to file for caching"""
+        import pickle
+        vocab_data = {
+            'node_vocab': self.node_vocab,
+            'feature_names': self.feature_names,
+            'feature_dims': self.feature_dims
+        }
+        with open(filepath, 'wb') as f:
+            pickle.dump(vocab_data, f)
+        print(f"Vocabulary saved to {filepath} ({len(self.node_vocab)} nodes)")
+    
+    def load_vocabulary(self, filepath: str) -> bool:
+        """Load vocabulary from file"""
+        import pickle
+        try:
+            with open(filepath, 'rb') as f:
+                vocab_data = pickle.load(f)
+            
+            self.node_vocab = vocab_data['node_vocab']
+            self.feature_names = vocab_data['feature_names'] 
+            self.feature_dims = vocab_data['feature_dims']
+            
+            print(f"Vocabulary loaded from {filepath} ({len(self.node_vocab)} nodes)")
+            return True
+        except (FileNotFoundError, Exception) as e:
+            print(f"Could not load vocabulary from {filepath}: {e}")
+            return False
         
     def extract_node_features(self, node: Dict) -> List[float]:
         """Extract numeric features from a node"""

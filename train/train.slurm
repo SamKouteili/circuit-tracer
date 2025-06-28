@@ -40,4 +40,4 @@ export TOKENIZERS_PARALLELISM=false
 
 echo "=== STARTING TRAINING ==="
 # Run training with the local dataset - small model, reasonable resources
-python train.py --dataset ../data --epochs 100 --batch_size 16 --lr 0.001 --output_dir ./local_training_output
+python train.py --dataset ../data --epochs 100 --batch_size 16 --lr 0.001 --output_dir ./local_training_output --cache_dir ./train_cache

@@ -38,7 +38,8 @@ def create_datasets_from_huggingface(
     dataset_name: str = "samkouteili/injection-attribution-graphs",
     test_size: float = 0.2,
     val_size: float = 0.1,
-    random_state: int = 42
+    random_state: int = 42,
+    cache_dir: str = None
 ) -> Tuple[PromptInjectionDataset, PromptInjectionDataset, PromptInjectionDataset, AttributionGraphConverter]:
     """
     Create train/val/test datasets from Hugging Face dataset using local conversion
@@ -67,12 +68,17 @@ def create_datasets_from_huggingface(
         f"Using converted files: {len(benign_files)} benign, {len(injected_files)} injected")
 
     # Use the converted files with proper JSON string handling
+    # Use provided cache_dir or auto-generate one
+    if cache_dir is None:
+        cache_dir = f"./cache/{dataset_name.replace('/', '_')}"
+    
     return create_datasets_from_converted_files(
         benign_files=benign_files,
         injected_files=injected_files,
         test_size=test_size,
         val_size=val_size,
-        random_state=random_state
+        random_state=random_state,
+        cache_dir=cache_dir
     )
 
 
@@ -80,7 +86,8 @@ def create_datasets_from_local_directory(
     dataset_path: str,
     test_size: float = 0.2,
     val_size: float = 0.1,
-    random_state: int = 42
+    random_state: int = 42,
+    cache_dir: str = None
 ) -> Tuple[PromptInjectionDataset, PromptInjectionDataset, PromptInjectionDataset, AttributionGraphConverter]:
     """
     Create datasets from local directory with benign/ and injected/ subdirectories
@@ -128,27 +135,54 @@ def create_datasets_from_local_directory(
     benign_file_paths = [str(f) for f in benign_files]
     injected_file_paths = [str(f) for f in injected_files]
 
+    # Use provided cache_dir or auto-generate one
+    if cache_dir is None:
+        cache_dir = f"./cache/{Path(dataset_path).name}"
+    
     return create_datasets_from_converted_files(
         benign_files=benign_file_paths,
         injected_files=injected_file_paths,
         test_size=test_size,
         val_size=val_size,
-        random_state=random_state
+        random_state=random_state,
+        cache_dir=cache_dir
     )
 
 
-def create_datasets_from_converted_files(benign_files, injected_files, test_size=0.2, val_size=0.1, random_state=42):
-    """Create datasets from converted files that have JSON strings - memory efficient version"""
+def create_datasets_from_converted_files(benign_files, injected_files, test_size=0.2, val_size=0.1, random_state=42, cache_dir=None):
+    """Create datasets from converted files that have JSON strings - memory efficient version with caching"""
 
-    print(
-        f"Creating datasets from {len(benign_files)} benign and {len(injected_files)} injected converted files...")
-    print("Using memory-efficient streaming approach...")
+    print(f"Creating datasets from {len(benign_files)} benign and {len(injected_files)} injected converted files...")
+    print("Using memory-efficient streaming approach with caching...")
+
+    # Setup cache directory
+    if cache_dir:
+        import os
+        os.makedirs(cache_dir, exist_ok=True)
+        vocab_cache_path = os.path.join(cache_dir, "vocabulary.pkl")
+        dataset_cache_path = os.path.join(cache_dir, "datasets.pkl")
+        splits_cache_path = os.path.join(cache_dir, "splits.pkl")
+        print(f"📁 Cache directory: {cache_dir}")
+        print(f"   Vocabulary cache: {vocab_cache_path}")
+        print(f"   Dataset cache: {dataset_cache_path}")
+    else:
+        vocab_cache_path = dataset_cache_path = splits_cache_path = None
+        print("⚠️  No caching enabled - processing will start from scratch")
 
     # Initialize converter
     converter = AttributionGraphConverter()
 
-    # PASS 1: Build vocabulary efficiently by streaming through files
-    print("Pass 1: Building vocabulary from files...")
+    # PHASE 1: Load or build vocabulary
+    vocab_loaded = False
+    if vocab_cache_path and os.path.exists(vocab_cache_path):
+        print("🔄 Loading cached vocabulary...")
+        vocab_loaded = converter.load_vocabulary(vocab_cache_path)
+    
+    if not vocab_loaded:
+        print("🔧 Building vocabulary from scratch...")
+        
+        # PASS 1: Build vocabulary efficiently by streaming through files
+        print("Pass 1: Building vocabulary from files...")
 
     def json_string_generator():
         """Generator that yields JSON strings without storing them all in memory"""
@@ -204,18 +238,41 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
         tqdm.write(
             f"Vocabulary building: {successful_files} successful, {failed_files} failed files")
 
-    # Build vocabulary using generator (doesn't store all strings in memory)
-    vocab_success = converter.build_vocabulary_from_json_strings(
-        json_string_generator())
+        # Build vocabulary using generator (doesn't store all strings in memory)
+        vocab_success = converter.build_vocabulary_from_json_strings(
+            json_string_generator())
 
-    if not vocab_success:
-        raise ValueError("Failed to build vocabulary from converted files")
+        if not vocab_success:
+            raise ValueError("Failed to build vocabulary from converted files")
+        
+        # Save vocabulary to cache
+        if vocab_cache_path:
+            converter.save_vocabulary(vocab_cache_path)
+    
+    else:
+        print("✅ Using cached vocabulary")
 
-    # PASS 2: Convert to PyG Data objects (reuse the file reading, discard JSON strings immediately)
-    print("Pass 2: Converting to PyG data objects...")
-    all_data = []
-    conversion_stats = {'benign': {'success': 0, 'failed': 0},
-                        'injected': {'success': 0, 'failed': 0}}
+    # PHASE 2: Load or convert PyG Data objects
+    dataset_loaded = False
+    if dataset_cache_path and os.path.exists(dataset_cache_path):
+        print("🔄 Loading cached PyG datasets...")
+        try:
+            import pickle
+            with open(dataset_cache_path, 'rb') as f:
+                cached_data = pickle.load(f)
+            all_data = cached_data['all_data']
+            conversion_stats = cached_data['conversion_stats']
+            dataset_loaded = True
+            print(f"✅ Loaded {len(all_data)} cached PyG data objects")
+        except Exception as e:
+            print(f"Failed to load cached datasets: {e}")
+            dataset_loaded = False
+    
+    if not dataset_loaded:
+        print("🔧 Converting to PyG data objects from scratch...")
+        all_data = []
+        conversion_stats = {'benign': {'success': 0, 'failed': 0},
+                            'injected': {'success': 0, 'failed': 0}}
 
     # Process benign files (label=0)
     for file_path in tqdm(benign_files, desc="Converting benign files", unit="file"):
@@ -288,11 +345,29 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
         except (json.JSONDecodeError, Exception) as e:
             conversion_stats['injected']['failed'] += 1
 
-    print(f"Conversion results:")
-    print(
-        f"  Benign graphs: {conversion_stats['benign']['success']} success, {conversion_stats['benign']['failed']} failed")
-    print(
-        f"  Injected graphs: {conversion_stats['injected']['success']} success, {conversion_stats['injected']['failed']} failed")
+        print(f"Conversion results:")
+        print(
+            f"  Benign graphs: {conversion_stats['benign']['success']} success, {conversion_stats['benign']['failed']} failed")
+        print(
+            f"  Injected graphs: {conversion_stats['injected']['success']} success, {conversion_stats['injected']['failed']} failed")
+        
+        # Save datasets to cache
+        if dataset_cache_path:
+            print("💾 Saving PyG datasets to cache...")
+            try:
+                import pickle
+                cache_data = {
+                    'all_data': all_data,
+                    'conversion_stats': conversion_stats
+                }
+                with open(dataset_cache_path, 'wb') as f:
+                    pickle.dump(cache_data, f)
+                print(f"✅ Cached {len(all_data)} PyG data objects")
+            except Exception as e:
+                print(f"Warning: Failed to save datasets to cache: {e}")
+    
+    else:
+        print("✅ Using cached PyG datasets")
 
     if len(all_data) == 0:
         raise ValueError("No graphs were successfully converted!")
