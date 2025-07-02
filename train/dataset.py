@@ -71,7 +71,7 @@ def create_datasets_from_huggingface(
     # Use provided cache_dir or auto-generate one
     if cache_dir is None:
         cache_dir = f"./cache/{dataset_name.replace('/', '_')}"
-    
+
     return create_datasets_from_converted_files(
         benign_files=benign_files,
         injected_files=injected_files,
@@ -138,7 +138,7 @@ def create_datasets_from_local_directory(
     # Use provided cache_dir or auto-generate one
     if cache_dir is None:
         cache_dir = f"./cache/{Path(dataset_path).name}"
-    
+
     return create_datasets_from_converted_files(
         benign_files=benign_file_paths,
         injected_files=injected_file_paths,
@@ -152,7 +152,8 @@ def create_datasets_from_local_directory(
 def create_datasets_from_converted_files(benign_files, injected_files, test_size=0.2, val_size=0.1, random_state=42, cache_dir=None):
     """Create datasets from converted files that have JSON strings - memory efficient version with caching"""
 
-    print(f"Creating datasets from {len(benign_files)} benign and {len(injected_files)} injected converted files...")
+    print(
+        f"Creating datasets from {len(benign_files)} benign and {len(injected_files)} injected converted files...")
     print("Using memory-efficient streaming approach with caching...")
 
     # Setup cache directory
@@ -160,13 +161,16 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
         import os
         os.makedirs(cache_dir, exist_ok=True)
         vocab_cache_path = os.path.join(cache_dir, "vocabulary.pkl")
-        dataset_cache_path = os.path.join(cache_dir, "datasets.pkl")
-        splits_cache_path = os.path.join(cache_dir, "splits.pkl")
+        train_cache_path = os.path.join(cache_dir, "train_dataset.pkl")
+        val_cache_path = os.path.join(cache_dir, "val_dataset.pkl")
+        test_cache_path = os.path.join(cache_dir, "test_dataset.pkl")
         print(f"📁 Cache directory: {cache_dir}")
         print(f"   Vocabulary cache: {vocab_cache_path}")
-        print(f"   Dataset cache: {dataset_cache_path}")
+        print(f"   Train dataset cache: {train_cache_path}")
+        print(f"   Val dataset cache: {val_cache_path}")
+        print(f"   Test dataset cache: {test_cache_path}")
     else:
-        vocab_cache_path = dataset_cache_path = splits_cache_path = None
+        vocab_cache_path = train_cache_path = val_cache_path = test_cache_path = None
         print("⚠️  No caching enabled - processing will start from scratch")
 
     # Initialize converter
@@ -177,10 +181,10 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
     if vocab_cache_path and os.path.exists(vocab_cache_path):
         print("🔄 Loading cached vocabulary...")
         vocab_loaded = converter.load_vocabulary(vocab_cache_path)
-    
+
     if not vocab_loaded:
         print("🔧 Building vocabulary from scratch...")
-        
+
         # PASS 1: Build vocabulary efficiently by streaming through files
         print("Pass 1: Building vocabulary from files...")
 
@@ -233,7 +237,8 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
                 except Exception as e:
                     failed_files += 1
                     if failed_files <= 5:  # Only show first 5 other errors
-                        tqdm.write(f"Error loading {file_path}: {str(e)[:100]}...")
+                        tqdm.write(
+                            f"Error loading {file_path}: {str(e)[:100]}...")
 
             tqdm.write(
                 f"Vocabulary building: {successful_files} successful, {failed_files} failed files")
@@ -244,31 +249,41 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
 
         if not vocab_success:
             raise ValueError("Failed to build vocabulary from converted files")
-        
+
         # Save vocabulary to cache
         if vocab_cache_path:
             converter.save_vocabulary(vocab_cache_path)
-    
+
     else:
         print("✅ Using cached vocabulary")
 
-    # PHASE 2: Load or convert PyG Data objects
-    dataset_loaded = False
-    if dataset_cache_path and os.path.exists(dataset_cache_path):
-        print("🔄 Loading cached PyG datasets...")
+    # PHASE 2: Check for cached split datasets
+    splits_loaded = False
+    if (train_cache_path and
+        val_cache_path and
+        test_cache_path and
+        os.path.exists(train_cache_path) and
+        os.path.exists(val_cache_path) and
+            os.path.exists(test_cache_path)):
+        print("🔄 Loading cached split datasets...")
         try:
             import pickle
-            with open(dataset_cache_path, 'rb') as f:
-                cached_data = pickle.load(f)
-            all_data = cached_data['all_data']
-            conversion_stats = cached_data['conversion_stats']
-            dataset_loaded = True
-            print(f"✅ Loaded {len(all_data)} cached PyG data objects")
+            with open(train_cache_path, 'rb') as f:
+                train_data = pickle.load(f)
+            with open(val_cache_path, 'rb') as f:
+                val_data = pickle.load(f)
+            with open(test_cache_path, 'rb') as f:
+                test_data = pickle.load(f)
+            splits_loaded = True
+            print(f"✅ Loaded cached datasets:")
+            print(f"   Train: {len(train_data)} graphs")
+            print(f"   Val: {len(val_data)} graphs")
+            print(f"   Test: {len(test_data)} graphs")
         except Exception as e:
-            print(f"Failed to load cached datasets: {e}")
-            dataset_loaded = False
-    
-    if not dataset_loaded:
+            print(f"Failed to load cached split datasets: {e}")
+            splits_loaded = False
+
+    if not splits_loaded:
         print("🔧 Converting to PyG data objects from scratch...")
         all_data = []
         conversion_stats = {'benign': {'success': 0, 'failed': 0},
@@ -296,7 +311,8 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
                     json_string = json.dumps(file_data)
 
                 if json_string:
-                    data = converter.json_string_to_pyg_data(json_string, label=0)
+                    data = converter.json_string_to_pyg_data(
+                        json_string, label=0)
                     if data is not None:
                         all_data.append(data)
                         conversion_stats['benign']['success'] += 1
@@ -330,7 +346,8 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
                     json_string = json.dumps(file_data)
 
                 if json_string:
-                    data = converter.json_string_to_pyg_data(json_string, label=1)
+                    data = converter.json_string_to_pyg_data(
+                        json_string, label=1)
                     if data is not None:
                         all_data.append(data)
                         conversion_stats['injected']['success'] += 1
@@ -347,56 +364,73 @@ def create_datasets_from_converted_files(benign_files, injected_files, test_size
             f"  Benign graphs: {conversion_stats['benign']['success']} success, {conversion_stats['benign']['failed']} failed")
         print(
             f"  Injected graphs: {conversion_stats['injected']['success']} success, {conversion_stats['injected']['failed']} failed")
-        
-        # Save datasets to cache
-        if dataset_cache_path:
-            print("💾 Saving PyG datasets to cache...")
+
+        if len(all_data) == 0:
+            raise ValueError("No graphs were successfully converted!")
+
+        # Create labels for stratification
+        labels = [data.y.item() for data in all_data]
+
+        # Check class balance
+        num_benign = sum(1 for label in labels if label == 0)
+        num_injected = sum(1 for label in labels if label == 1)
+
+        print(
+            f"Dataset composition: {num_benign} benign, {num_injected} injected graphs")
+
+        if num_benign == 0 or num_injected == 0:
+            raise ValueError(
+                "Dataset must contain both benign and injected graphs!")
+
+        print("🔀 Creating train/val/test splits...")
+        # Stratified splits to maintain class balance
+        train_val_data, test_data, train_val_labels, test_labels = train_test_split(
+            all_data, labels,
+            test_size=test_size,
+            stratify=labels,
+            random_state=random_state
+        )
+
+        train_data, val_data, _, _ = train_test_split(
+            train_val_data, train_val_labels,
+            test_size=val_size / (1 - test_size),
+            stratify=train_val_labels,
+            random_state=random_state
+        )
+
+        print(
+            f"Split sizes: Train={len(train_data)}, Val={len(val_data)}, Test={len(test_data)}")
+
+        # Save each split separately
+        if train_cache_path and val_cache_path and test_cache_path:
+            print("💾 Saving split datasets to cache...")
+
             try:
                 import pickle
-                cache_data = {
-                    'all_data': all_data,
-                    'conversion_stats': conversion_stats
-                }
-                with open(dataset_cache_path, 'wb') as f:
-                    pickle.dump(cache_data, f)
-                print(f"✅ Cached {len(all_data)} PyG data objects")
+                with open(train_cache_path, 'wb') as f:
+                    pickle.dump(train_data, f)
+                print(f"✅ Cached {len(train_data)} train graphs")
+
+                with open(val_cache_path, 'wb') as f:
+                    pickle.dump(val_data, f)
+                print(f"✅ Cached {len(val_data)} val graphs")
+
+                with open(test_cache_path, 'wb') as f:
+                    pickle.dump(test_data, f)
+                print(f"✅ Cached {len(test_data)} test graphs")
             except Exception as e:
-                print(f"Warning: Failed to save datasets to cache: {e}")
-    
+                print(f"Warning: Failed to save split caches: {e}")
+
     else:
-        print("✅ Using cached PyG datasets")
+        print("✅ Using cached split datasets")
 
-    if len(all_data) == 0:
-        raise ValueError("No graphs were successfully converted!")
-
-    # Create labels for stratification
-    labels = [data.y.item() for data in all_data]
-
-    # Check class balance
-    num_benign = sum(1 for label in labels if label == 0)
-    num_injected = sum(1 for label in labels if label == 1)
-
-    print(
-        f"Dataset composition: {num_benign} benign, {num_injected} injected graphs")
-
-    if num_benign == 0 or num_injected == 0:
-        raise ValueError(
-            "Dataset must contain both benign and injected graphs!")
-
-    # Stratified splits to maintain class balance
-    train_val_data, test_data, train_val_labels, test_labels = train_test_split(
-        all_data, labels,
-        test_size=test_size,
-        stratify=labels,
-        random_state=random_state
-    )
-
-    train_data, val_data, _, _ = train_test_split(
-        train_val_data, train_val_labels,
-        test_size=val_size / (1 - test_size),
-        stratify=train_val_labels,
-        random_state=random_state
-    )
+    if not splits_loaded:
+        # We just created the splits above
+        pass
+    else:
+        # Check that we have the split data from cache loading
+        if len(train_data) == 0 or len(val_data) == 0 or len(test_data) == 0:
+            raise ValueError("Empty dataset splits loaded from cache!")
     # Create datasets
     train_dataset = PromptInjectionDataset(train_data)
     val_dataset = PromptInjectionDataset(val_data)
