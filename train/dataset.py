@@ -152,18 +152,27 @@ def create_datasets_from_local_directory(
 def create_datasets_from_converted_files(benign_files, injected_files, test_size=0.2, val_size=0.1, random_state=42, cache_dir=None):
     """Create datasets from converted files that have JSON strings - memory efficient version with caching"""
 
+    # Balance dataset by subsampling injected files to match benign files
+    if len(injected_files) > len(benign_files):
+        import random
+        random.seed(random_state)
+        injected_files = random.sample(injected_files, len(benign_files))
+        print(f"🎯 Balanced dataset: subsampled {len(injected_files)} injected files to match {len(benign_files)} benign files")
+    
     print(
         f"Creating datasets from {len(benign_files)} benign and {len(injected_files)} injected converted files...")
     print("Using memory-efficient streaming approach with caching...")
 
-    # Setup cache directory
+    # Setup cache directory with size-specific cache names
     if cache_dir:
         import os
         os.makedirs(cache_dir, exist_ok=True)
-        vocab_cache_path = os.path.join(cache_dir, "vocabulary.pkl")
-        train_cache_path = os.path.join(cache_dir, "train_dataset.pkl")
-        val_cache_path = os.path.join(cache_dir, "val_dataset.pkl")
-        test_cache_path = os.path.join(cache_dir, "test_dataset.pkl")
+        # Include dataset size in cache names to avoid conflicts
+        size_suffix = f"_b{len(benign_files)}_i{len(injected_files)}"
+        vocab_cache_path = os.path.join(cache_dir, f"vocabulary{size_suffix}.pkl")
+        train_cache_path = os.path.join(cache_dir, f"train_dataset{size_suffix}.pkl")
+        val_cache_path = os.path.join(cache_dir, f"val_dataset{size_suffix}.pkl")
+        test_cache_path = os.path.join(cache_dir, f"test_dataset{size_suffix}.pkl")
         print(f"📁 Cache directory: {cache_dir}")
         print(f"   Vocabulary cache: {vocab_cache_path}")
         print(f"   Train dataset cache: {train_cache_path}")
