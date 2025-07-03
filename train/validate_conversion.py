@@ -80,6 +80,114 @@ def inspect_raw_graph(json_file_path):
                 print(f"Edge weights: min={min(weights):.4f}, max={max(weights):.4f}, mean={np.mean(weights):.4f}")
 
 
+def verify_feature_conversion(json_file_path, converter, label):
+    """Verify that features are correctly converted from JSON to PyG"""
+    json_file_path = str(json_file_path)
+    print(f"\n=== Feature Conversion Verification: {Path(json_file_path).name} ===")
+    
+    # Read and parse the original JSON
+    with open(json_file_path, 'r') as f:
+        data = json.load(f)
+    
+    # Handle both formats
+    if 'json' in data:
+        json_string = data['json']
+        original_graph = json.loads(json_string)
+    elif 'nodes' in data and 'links' in data:
+        json_string = json.dumps(data)
+        original_graph = data
+    else:
+        print("❌ Unknown file format")
+        return False
+    
+    # Convert to PyG
+    pyg_data = converter.json_string_to_pyg_data(json_string, label=label)
+    
+    if pyg_data is None:
+        print("❌ Conversion failed!")
+        return False
+    
+    print(f"✅ Conversion successful: {pyg_data.num_nodes} nodes, {pyg_data.edge_index.shape[1]} edges")
+    
+    # Get original nodes (excluding error nodes)
+    original_nodes = []
+    for node in original_graph['nodes']:
+        if 'node_id' in node and not converter._is_error_node(node):
+            original_nodes.append(node)
+    
+    print(f"Original valid nodes: {len(original_nodes)}")
+    print(f"PyG nodes: {pyg_data.num_nodes}")
+    
+    if len(original_nodes) != pyg_data.num_nodes:
+        print("❌ Node count mismatch!")
+        return False
+    
+    # Verify features for first few nodes
+    print(f"\n🔍 Verifying features for first 3 nodes:")
+    feature_names = converter.feature_names
+    
+    mismatches = 0
+    for i in range(min(3, len(original_nodes))):
+        original_node = original_nodes[i]
+        pyg_features = pyg_data.x[i]
+        
+        print(f"\nNode {i} ({original_node.get('node_id', 'unknown')}):")
+        
+        # Extract expected features manually
+        expected_features = converter.extract_node_features(original_node)
+        
+        print(f"  Expected: {expected_features}")
+        print(f"  PyG:      {pyg_features.tolist()}")
+        
+        # Compare each feature
+        for j, (expected, actual, fname) in enumerate(zip(expected_features, pyg_features.tolist(), feature_names)):
+            if abs(expected - actual) > 1e-6:
+                print(f"    ❌ {fname}: expected {expected}, got {actual}")
+                mismatches += 1
+            else:
+                print(f"    ✅ {fname}: {actual}")
+    
+    # Test edge preservation
+    print(f"\n🔍 Verifying edge conversion:")
+    original_edges = original_graph.get('links', original_graph.get('edges', []))
+    
+    # Create node ID to index mapping
+    node_id_to_idx = {}
+    for i, node in enumerate(original_nodes):
+        node_id_to_idx[node['node_id']] = i
+    
+    # Count valid original edges
+    valid_original_edges = 0
+    for edge in original_edges:
+        source_id = edge.get('source')
+        target_id = edge.get('target')
+        if source_id in node_id_to_idx and target_id in node_id_to_idx:
+            valid_original_edges += 1
+    
+    print(f"  Original valid edges: {valid_original_edges}")
+    print(f"  PyG edges: {pyg_data.edge_index.shape[1]}")
+    
+    if valid_original_edges != pyg_data.edge_index.shape[1]:
+        print(f"    ❌ Edge count mismatch!")
+        mismatches += 1
+    else:
+        print(f"    ✅ Edge count matches")
+    
+    # Verify a few edge weights
+    if pyg_data.edge_index.shape[1] > 0:
+        print(f"  Sample edge weights:")
+        for i in range(min(3, pyg_data.edge_index.shape[1])):
+            edge_weight = pyg_data.edge_attr[i].item()
+            print(f"    Edge {i}: weight = {edge_weight}")
+    
+    if mismatches == 0:
+        print(f"\n✅ All feature verifications passed!")
+        return True
+    else:
+        print(f"\n❌ Found {mismatches} feature mismatches!")
+        return False
+
+
 def inspect_pyg_conversion(json_file_path, converter, label):
     """Test conversion of a single file to PyG"""
     json_file_path = str(json_file_path)  # Convert Path to string
@@ -248,17 +356,23 @@ def main():
     for i, file_path in enumerate(injected_files[:2]):
         inspect_raw_graph(file_path)
     
-    # Test PyG conversion
-    print(f"\n3️⃣ Testing PyG conversion...")
-    for i, file_path in enumerate(benign_files):
-        pyg_data = inspect_pyg_conversion(file_path, converter, label=0)
-        if i >= 1:  # Limit output
-            break
+    # Test PyG conversion with detailed feature verification
+    print(f"\n3️⃣ Testing PyG conversion with feature verification...")
     
-    for i, file_path in enumerate(injected_files):
-        pyg_data = inspect_pyg_conversion(file_path, converter, label=1)
-        if i >= 1:  # Limit output
-            break
+    verification_passed = 0
+    total_tests = 0
+    
+    for i, file_path in enumerate(benign_files[:2]):  # Test 2 benign files
+        total_tests += 1
+        if verify_feature_conversion(file_path, converter, label=0):
+            verification_passed += 1
+    
+    for i, file_path in enumerate(injected_files[:2]):  # Test 2 injected files
+        total_tests += 1
+        if verify_feature_conversion(file_path, converter, label=1):
+            verification_passed += 1
+    
+    print(f"\n🎯 Feature Verification Summary: {verification_passed}/{total_tests} files passed all checks")
     
     # Full dataset analysis (optional)
     if not args.skip_dataset_creation:
