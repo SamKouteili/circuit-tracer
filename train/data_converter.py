@@ -136,8 +136,23 @@ class AttributionGraphConverter:
         ctx_idx = node.get('ctx_idx', 0)
         features.append(float(ctx_idx if ctx_idx is not None else 0))
         
-        feature = node.get('feature', 0)
-        features.append(float(feature if feature is not None else 0))
+        # Instead of raw feature (mixed semantics), use feature type indicators
+        feature_val = node.get('feature', 0)
+        feature_type = node.get('feature_type', 'unknown')
+        
+        # Separate the feature field by type to avoid mixed semantics
+        if feature_type == 'cross layer transcoder':
+            # Normalize feature index to reasonable range
+            features.append(float(feature_val) / 1000.0 if feature_val is not None else 0.0)
+        elif feature_type == 'embedding':
+            # Token position - keep as is (small values)
+            features.append(float(feature_val) if feature_val is not None else 0.0)
+        elif feature_type == 'logit':
+            # Vocabulary ID - normalize to reasonable range  
+            features.append(float(feature_val) / 10000.0 if feature_val is not None else 0.0)
+        else:
+            # Error nodes or unknown - set to 0
+            features.append(0.0)
         
         # One-hot encoded feature types
         feature_type = node.get('feature_type', 'unknown')
