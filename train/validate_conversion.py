@@ -22,6 +22,7 @@ except ImportError:
 
 def inspect_raw_graph(json_file_path):
     """Inspect a raw JSON attribution graph"""
+    json_file_path = str(json_file_path)  # Convert Path to string
     print(f"\n=== Inspecting Raw Graph: {Path(json_file_path).name} ===")
     
     with open(json_file_path, 'r') as f:
@@ -81,6 +82,7 @@ def inspect_raw_graph(json_file_path):
 
 def inspect_pyg_conversion(json_file_path, converter, label):
     """Test conversion of a single file to PyG"""
+    json_file_path = str(json_file_path)  # Convert Path to string
     print(f"\n=== Testing PyG Conversion: {Path(json_file_path).name} ===")
     
     # Read file
