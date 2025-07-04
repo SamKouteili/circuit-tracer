@@ -10,7 +10,7 @@ from torch_geometric.data import Data
 from sklearn.metrics import jaccard_score
 import copy
 
-from .explanation import AttributionGraphExplanation
+from explanation import AttributionGraphExplanation
 
 
 class ExplanationEvaluator:
@@ -453,7 +453,7 @@ def test_evaluator():
             return logits, h
     
     # Create dummy explanation
-    from .explanation import AttributionGraphExplanation
+    from explanation import AttributionGraphExplanation
     
     explanation = AttributionGraphExplanation(
         graph_id="test_graph",

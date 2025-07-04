@@ -10,7 +10,7 @@ from torch_geometric.data import Data, Batch
 from typing import Optional, Union, Dict, Any
 import time
 
-from .explanation import AttributionGraphExplanation
+from explanation import AttributionGraphExplanation
 
 
 class CircuitTracerGNNExplainer:

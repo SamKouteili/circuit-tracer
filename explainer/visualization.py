@@ -12,7 +12,7 @@ import networkx as nx
 from matplotlib.colors import LinearSegmentedColormap
 import os
 
-from .explanation import AttributionGraphExplanation
+from explanation import AttributionGraphExplanation
 
 
 class ExplanationVisualizer:
@@ -568,7 +568,7 @@ def test_visualizer():
     """Test the visualization tools with dummy data"""
     print("Testing ExplanationVisualizer...")
     
-    from .explanation import AttributionGraphExplanation
+    from explanation import AttributionGraphExplanation
     
     # Create dummy explanation
     explanation = AttributionGraphExplanation(

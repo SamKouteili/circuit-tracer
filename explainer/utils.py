@@ -13,7 +13,7 @@ from pathlib import Path
 import time
 from datetime import datetime
 
-from .explanation import AttributionGraphExplanation, ExplanationBatch
+from explanation import AttributionGraphExplanation, ExplanationBatch
 
 
 class ExplanationCache:

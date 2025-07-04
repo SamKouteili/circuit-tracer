@@ -6,7 +6,7 @@ to circuit-tracer attribution graph insights
 import torch
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any, Set
-from .explanation import AttributionGraphExplanation
+from explanation import AttributionGraphExplanation
 
 
 class CircuitTracerExplanationProcessor:

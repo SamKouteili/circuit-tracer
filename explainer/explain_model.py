@@ -14,6 +14,8 @@ from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
+# Add current directory to path for local imports
+sys.path.append(str(Path(__file__).parent))
 
 from torch_geometric.data import Data, DataLoader
 from gnn_explainer_core import CircuitTracerGNNExplainer
@@ -31,6 +33,15 @@ try:
 except ImportError as e:
     print(f"Warning: Could not import training modules: {e}")
     print("Make sure you're running from the correct directory")
+    # Try alternative import paths
+    try:
+        sys.path.append(str(Path(__file__).parent.parent / "train"))
+        from models import GraphGPS
+        from dataset import create_dataset_from_converted_files
+        from data_converter import AttributionGraphConverter
+    except ImportError as e2:
+        print(f"Could not import with alternative path: {e2}")
+        GraphGPS = None
 
 
 def load_trained_model(model_path: str, device: str = 'cuda') -> GraphGPS:
