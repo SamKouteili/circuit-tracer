@@ -92,73 +92,106 @@ def load_trained_model(model_path: str, device: str = 'cuda') -> GraphGPS:
     return model, config
 
 
-def load_dataset_for_explanation(data_path: str, 
+def load_dataset_for_explanation(cache_dir: str, 
+                                dataset_split: str = 'test',
                                 subset_size: Optional[int] = None) -> List[Data]:
     """
-    Load dataset for explanation generation
+    Load cached PyG dataset for explanation generation
     
     Args:
-        data_path: Path to dataset directory or file
+        cache_dir: Path to cache directory containing the PyG dataset files
+        dataset_split: Which split to load ('train', 'val', 'test', or 'all')
         subset_size: Optional limit on number of graphs to load
         
     Returns:
         List of PyG Data objects
     """
-    print(f"📥 Loading dataset from {data_path}")
+    print(f"📥 Loading cached dataset from {cache_dir}")
     
-    if not os.path.exists(data_path):
-        raise FileNotFoundError(f"Dataset path not found: {data_path}")
+    if not os.path.exists(cache_dir):
+        raise FileNotFoundError(f"Cache directory not found: {cache_dir}")
     
-    # If it's a pickle file, load directly
-    if data_path.endswith('.pkl'):
-        import pickle
-        with open(data_path, 'rb') as f:
-            dataset = pickle.load(f)
-        if hasattr(dataset, 'data_list'):
-            dataset = dataset.data_list
+    # Find cached dataset files by pattern matching
+    import glob
+    import pickle
+    
+    cache_files = {}
+    for split in ['train', 'val', 'test']:
+        pattern = os.path.join(cache_dir, f"{split}_dataset_*.pkl")
+        matching_files = glob.glob(pattern)
+        if matching_files:
+            # Use the most recent file if multiple exist
+            cache_files[split] = max(matching_files, key=os.path.getmtime)
+    
+    if not cache_files:
+        raise FileNotFoundError(f"No cached dataset files found in {cache_dir}")
+    
+    print(f"Found cached datasets:")
+    for split, path in cache_files.items():
+        file_size = os.path.getsize(path) / (1024 * 1024)  # MB
+        print(f"  {split}: {os.path.basename(path)} ({file_size:.1f} MB)")
+    
+    # Load requested dataset split(s)
+    datasets_to_load = []
+    if dataset_split == 'all':
+        datasets_to_load = ['train', 'val', 'test']
+    elif dataset_split in cache_files:
+        datasets_to_load = [dataset_split]
     else:
-        # Otherwise, try to load using the dataset creation function
-        try:
-            # This assumes the path contains converted attribution graphs
-            converter = AttributionGraphConverter()
-            dataset = create_dataset_from_converted_files(
-                converted_dir=data_path,
-                converter=converter,
-                test_split=0.0,  # Load all data
-                val_split=0.0,
-                cache_dir=None  # Don't use cache for explanation
-            )
-            dataset = dataset['all']  # Use all data
-        except Exception as e:
-            print(f"⚠️ Could not load dataset using standard method: {e}")
-            raise
+        available = list(cache_files.keys())
+        raise ValueError(f"Split '{dataset_split}' not available. Available: {available}")
     
-    if subset_size is not None and len(dataset) > subset_size:
-        print(f"🎯 Using subset of {subset_size} graphs from {len(dataset)} total")
-        dataset = dataset[:subset_size]
+    all_data = []
+    for split in datasets_to_load:
+        if split in cache_files:
+            print(f"🔄 Loading {split} dataset...")
+            try:
+                with open(cache_files[split], 'rb') as f:
+                    dataset = pickle.load(f)
+                
+                # Handle different dataset formats
+                if hasattr(dataset, 'data_list'):
+                    split_data = dataset.data_list
+                elif isinstance(dataset, list):
+                    split_data = dataset
+                else:
+                    raise ValueError(f"Unexpected dataset format: {type(dataset)}")
+                
+                print(f"  ✅ Loaded {len(split_data)} graphs from {split} split")
+                all_data.extend(split_data)
+                
+            except Exception as e:
+                print(f"  ❌ Failed to load {split} dataset: {e}")
+                raise
     
-    print(f"✅ Loaded {len(dataset)} graphs for explanation")
+    if subset_size is not None and len(all_data) > subset_size:
+        print(f"🎯 Using subset of {subset_size} graphs from {len(all_data)} total")
+        all_data = all_data[:subset_size]
     
-    return dataset
+    print(f"✅ Loaded {len(all_data)} graphs for explanation")
+    
+    return all_data
 
 
 def explain_single_graph(model_path: str,
-                        data_path: str,
+                        cache_dir: str,
                         graph_index: int = 0,
                         output_dir: str = "./explanations",
                         device: str = 'cuda',
                         epochs: int = 200,
+                        dataset_split: str = 'test',
                         visualize: bool = True) -> str:
     """
     Generate explanation for a single graph
     
     Args:
         model_path: Path to trained model
-        data_path: Path to dataset
+        cache_dir: Path to cache directory with PyG datasets
         graph_index: Index of graph to explain
         output_dir: Directory to save results
         device: Device for computation
         epochs: Number of explanation epochs
+        dataset_split: Which dataset split to use ('train', 'val', 'test')
         visualize: Whether to generate visualizations
         
     Returns:
@@ -170,7 +203,7 @@ def explain_single_graph(model_path: str,
     
     # Load model and data
     model, model_config = load_trained_model(model_path, device)
-    dataset = load_dataset_for_explanation(data_path)
+    dataset = load_dataset_for_explanation(cache_dir, dataset_split)
     
     if graph_index >= len(dataset):
         raise ValueError(f"Graph index {graph_index} out of range (dataset size: {len(dataset)})")
@@ -268,12 +301,13 @@ def explain_single_graph(model_path: str,
 
 
 def explain_dataset_batch(model_path: str,
-                         data_path: str,
+                         cache_dir: str,
                          output_dir: str = "./batch_explanations",
                          device: str = 'cuda',
                          epochs: int = 200,
                          batch_size: int = 32,
                          max_graphs: Optional[int] = None,
+                         dataset_split: str = 'test',
                          use_cache: bool = True,
                          generate_report: bool = True) -> str:
     """
@@ -281,12 +315,13 @@ def explain_dataset_batch(model_path: str,
     
     Args:
         model_path: Path to trained model
-        data_path: Path to dataset
+        cache_dir: Path to cache directory with PyG datasets
         output_dir: Directory to save results
         device: Device for computation
         epochs: Number of explanation epochs
         batch_size: Batch size for processing
         max_graphs: Maximum number of graphs to explain
+        dataset_split: Which dataset split to use ('train', 'val', 'test', 'all')
         use_cache: Whether to use explanation cache
         generate_report: Whether to generate analysis report
         
@@ -300,14 +335,14 @@ def explain_dataset_batch(model_path: str,
     # Initialize cache
     cache = None
     if use_cache:
-        cache_dir = output_path / "cache"
-        cache = ExplanationCache(str(cache_dir))
-        print(f"💾 Using explanation cache: {cache_dir}")
+        explanation_cache_dir = output_path / "explanation_cache"
+        cache = ExplanationCache(str(explanation_cache_dir))
+        print(f"💾 Using explanation cache: {explanation_cache_dir}")
         print(f"   Cache stats: {cache.get_cache_stats()}")
     
     # Load model and data
     model, model_config = load_trained_model(model_path, device)
-    dataset = load_dataset_for_explanation(data_path, subset_size=max_graphs)
+    dataset = load_dataset_for_explanation(cache_dir, dataset_split, subset_size=max_graphs)
     
     print(f"🎯 Explaining {len(dataset)} graphs in batches of {batch_size}")
     
@@ -545,26 +580,34 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Explain a single graph
-  python explain_model.py --model trained_model.pth --data dataset.pkl --mode single --graph-index 42
+  # Explain a single graph from test set
+  python explain_model.py --model trained_model.pth --cache-dir ./cache --mode single --graph-index 42
   
-  # Explain entire dataset
-  python explain_model.py --model trained_model.pth --data converted_graphs/ --mode batch --max-graphs 100
+  # Explain test dataset in batch
+  python explain_model.py --model trained_model.pth --cache-dir ./cache --mode batch --max-graphs 100
   
-  # Fast batch processing with cache
-  python explain_model.py --model trained_model.pth --data dataset.pkl --mode batch --use-cache --epochs 100
+  # Fast batch processing with explanation cache
+  python explain_model.py --model trained_model.pth --cache-dir ./cache --mode batch --use-cache --epochs 100
+  
+  # Explain all splits (train+val+test)
+  python explain_model.py --model trained_model.pth --cache-dir ./cache --mode batch --split all
         """
     )
     
     # Required arguments
     parser.add_argument('--model', required=True, type=str,
                        help='Path to trained GraphGPS model checkpoint')
-    parser.add_argument('--data', required=True, type=str,
-                       help='Path to dataset (directory or .pkl file)')
+    parser.add_argument('--cache-dir', required=True, type=str,
+                       help='Path to cache directory containing PyG dataset files')
     
     # Mode selection
     parser.add_argument('--mode', choices=['single', 'batch'], default='single',
                        help='Explanation mode: single graph or batch processing')
+    
+    # Dataset options
+    parser.add_argument('--split', type=str, default='test', 
+                       choices=['train', 'val', 'test', 'all'],
+                       help='Which dataset split to use for explanation')
     
     # Single graph options
     parser.add_argument('--graph-index', type=int, default=0,
@@ -607,8 +650,8 @@ Examples:
         print(f"❌ Model file not found: {args.model}")
         sys.exit(1)
     
-    if not os.path.exists(args.data):
-        print(f"❌ Data path not found: {args.data}")
+    if not os.path.exists(args.cache_dir):
+        print(f"❌ Cache directory not found: {args.cache_dir}")
         sys.exit(1)
     
     # Setup device
@@ -618,7 +661,8 @@ Examples:
     
     print(f"🚀 Starting explanation generation")
     print(f"   Model: {args.model}")
-    print(f"   Data: {args.data}")
+    print(f"   Cache Dir: {args.cache_dir}")
+    print(f"   Split: {args.split}")
     print(f"   Mode: {args.mode}")
     print(f"   Device: {args.device}")
     print(f"   Output: {args.output_dir}")
@@ -627,11 +671,12 @@ Examples:
         if args.mode == 'single':
             result_path = explain_single_graph(
                 model_path=args.model,
-                data_path=args.data,
+                cache_dir=args.cache_dir,
                 graph_index=args.graph_index,
                 output_dir=args.output_dir,
                 device=args.device,
                 epochs=args.epochs,
+                dataset_split=args.split,
                 visualize=not args.no_visualize
             )
             print(f"🎉 Single graph explanation completed: {result_path}")
@@ -639,12 +684,13 @@ Examples:
         elif args.mode == 'batch':
             result_path = explain_dataset_batch(
                 model_path=args.model,
-                data_path=args.data,
+                cache_dir=args.cache_dir,
                 output_dir=args.output_dir,
                 device=args.device,
                 epochs=args.epochs,
                 batch_size=args.batch_size,
                 max_graphs=args.max_graphs,
+                dataset_split=args.split,
                 use_cache=args.use_cache,
                 generate_report=not args.no_report
             )
