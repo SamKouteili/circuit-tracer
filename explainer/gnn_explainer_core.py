@@ -7,7 +7,7 @@ import torch.nn as nn
 from torch_geometric.explain import Explainer
 from torch_geometric.explain.algorithm import GNNExplainer
 from torch_geometric.data import Data, Batch
-from typing import Optional, Union, Dict, Any
+from typing import Optional, Union, Dict, Any, List
 import time
 
 from explanation import AttributionGraphExplanation

@@ -28,7 +28,7 @@ from utils import ExplanationCache, BatchProcessor, export_explanations_to_csv, 
 # Import model and data utilities
 try:
     from train.models import GraphGPS
-    from train.dataset import create_dataset_from_converted_files
+    from train.dataset import create_datasets_from_converted_files
     from train.data_converter import AttributionGraphConverter
 except ImportError as e:
     print(f"Warning: Could not import training modules: {e}")
@@ -36,15 +36,15 @@ except ImportError as e:
     # Try alternative import paths
     try:
         sys.path.append(str(Path(__file__).parent.parent / "train"))
-        from models import GraphGPS
-        from dataset import create_dataset_from_converted_files
+        from models import PromptInjectionGraphGPS
+        from dataset import create_datasets_from_converted_files
         from data_converter import AttributionGraphConverter
     except ImportError as e2:
         print(f"Could not import with alternative path: {e2}")
         GraphGPS = None
 
 
-def load_trained_model(model_path: str, device: str = 'cuda') -> GraphGPS:
+def load_trained_model(model_path: str, device: str = 'cuda') -> PromptInjectionGraphGPS:
     """
     Load a trained GraphGPS model from checkpoint
     
@@ -79,8 +79,7 @@ def load_trained_model(model_path: str, device: str = 'cuda') -> GraphGPS:
     config = {**default_config, **model_config}
     
     # Initialize model
-    model = GraphGPS(
-        num_features=config['num_features'],
+    model = PromptInjectionGraphGPS(
         hidden_dim=config['hidden_dim'],
         num_classes=config['num_classes'],
         num_layers=config['num_layers'],

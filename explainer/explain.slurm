@@ -86,7 +86,7 @@ echo "Files verified. Starting explanation generation..."
 echo ""
 
 # Run explanation generation
-python explainer/explain_model.py \
+python explain_model.py \
     --model "$MODEL_PATH" \
     --cache-dir "$CACHE_DIR" \
     --split "$SPLIT" \
