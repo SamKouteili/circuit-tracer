@@ -139,9 +139,9 @@ class GraphGPSLayer(nn.Module):
         
         self.dropout = nn.Dropout(dropout)
         
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor, batch: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor, batch: torch.Tensor, edge_weight: Optional[torch.Tensor] = None) -> torch.Tensor:
         # 1. Local message passing with residual connection
-        x_local = self.local_gnn(x, edge_index)
+        x_local = self.local_gnn(x, edge_index, edge_weight)
         x = self.norm1(x + self.dropout(x_local))
         
         # 2. Global attention with residual connection
@@ -221,8 +221,11 @@ class PromptInjectionGraphGPS(nn.Module):
         x = self.pos_encoder(x, edge_index, batch)
         
         # Apply GraphGPS layers
+        # Extract edge weights from edge_attr if provided
+        edge_weight = edge_attr[:, 0] if edge_attr is not None and edge_attr.size(1) > 0 else None
+        
         for layer in self.gps_layers:
-            x = layer(x, edge_index, batch)
+            x = layer(x, edge_index, batch, edge_weight)
         
         # Graph-level readout
         graph_embedding = self.readout(x, batch)
