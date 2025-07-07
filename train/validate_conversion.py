@@ -9,8 +9,6 @@ import numpy as np
 from pathlib import Path
 import argparse
 from collections import Counter
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 try:
     from train.dataset import create_datasets_from_local_directory, create_data_loaders
@@ -80,6 +78,163 @@ def inspect_raw_graph(json_file_path):
                 print(f"Edge weights: min={min(weights):.4f}, max={max(weights):.4f}, mean={np.mean(weights):.4f}")
 
 
+def verify_edge_attributes_detailed(original_edges, pyg_data, node_id_to_idx):
+    """Comprehensive edge attribute validation with normalization analysis"""
+    print(f"\n🔍 Detailed Edge Attribute Analysis:")
+    
+    edge_issues = 0
+    
+    # Collect all original edge weights for analysis
+    original_weights = []
+    converted_weights = pyg_data.edge_attr.flatten().tolist()
+    
+    for edge in original_edges:
+        weight = edge.get('weight', edge.get('value', 1.0))
+        if weight is not None:
+            original_weights.append(float(weight))
+    
+    print(f"  Original edge weight statistics:")
+    if original_weights:
+        original_array = np.array(original_weights)
+        print(f"    Count: {len(original_weights)}")
+        print(f"    Range: [{original_array.min():.6f}, {original_array.max():.6f}]")
+        print(f"    Mean: {original_array.mean():.6f}")
+        print(f"    Median: {np.median(original_array):.6f}")
+        print(f"    Std: {original_array.std():.6f}")
+        
+        # Percentiles for outlier analysis
+        p99 = np.percentile(original_array, 99)
+        p01 = np.percentile(original_array, 1)
+        print(f"    1st/99th percentiles: [{p01:.6f}, {p99:.6f}]")
+        
+        # Check for problematic values
+        zero_weights = sum(1 for w in original_weights if w == 0.0)
+        negative_weights = sum(1 for w in original_weights if w < 0)
+        large_weights = sum(1 for w in original_weights if abs(w) > 50)  # Based on analysis
+        extreme_weights = sum(1 for w in original_weights if abs(w) > 100)
+        tiny_weights = sum(1 for w in original_weights if 0 < abs(w) < 1e-6)
+        
+        print(f"    Zero weights: {zero_weights}")
+        print(f"    Negative weights: {negative_weights} ({negative_weights/len(original_weights):.1%})")
+        print(f"    Large weights (>50): {large_weights}")
+        print(f"    Extreme weights (>100): {extreme_weights}")
+        print(f"    Very tiny weights (<1e-6): {tiny_weights}")
+        
+        # Training stability assessment
+        weight_range = original_array.max() - original_array.min()
+        variance_ratio = original_array.std() / (abs(original_array.mean()) + 1e-8)
+        
+        print(f"    Weight range: {weight_range:.3f}")
+        print(f"    Variance/mean ratio: {variance_ratio:.3f}")
+        
+        stability_issues = []
+        if weight_range > 100:
+            stability_issues.append("Large weight range")
+        if variance_ratio > 10:
+            stability_issues.append("High variance")
+        if extreme_weights > 0:
+            stability_issues.append("Extreme outliers")
+        
+        if stability_issues:
+            print(f"    ⚠️  Training stability risks: {', '.join(stability_issues)}")
+            edge_issues += 1
+    
+    print(f"  Converted (normalized) edge weight statistics:")
+    if converted_weights:
+        converted_array = np.array(converted_weights)
+        print(f"    Count: {len(converted_weights)}")
+        print(f"    Range: [{converted_array.min():.6f}, {converted_array.max():.6f}]")
+        print(f"    Mean: {converted_array.mean():.6f}")
+        print(f"    Median: {np.median(converted_array):.6f}")
+        print(f"    Std: {converted_array.std():.6f}")
+        
+        # Check for numerical issues in converted weights
+        nan_weights = sum(1 for w in converted_weights if np.isnan(w))
+        inf_weights = sum(1 for w in converted_weights if np.isinf(w))
+        zero_converted = sum(1 for w in converted_weights if abs(w) < 1e-8)
+        negative_converted = sum(1 for w in converted_weights if w < 0)
+        
+        print(f"    NaN weights: {nan_weights}")
+        print(f"    Inf weights: {inf_weights}")
+        print(f"    Near-zero weights: {zero_converted}")
+        print(f"    Negative weights preserved: {negative_converted} ({negative_converted/len(converted_weights):.1%})")
+        
+        if nan_weights > 0 or inf_weights > 0:
+            print(f"    ❌ Found invalid converted edge weights!")
+            edge_issues += 1
+        else:
+            print(f"    ✅ All converted weights are valid")
+        
+        # Check normalization effectiveness for training stability
+        weight_range = converted_array.max() - converted_array.min()
+        variance_ratio = converted_array.std() / (abs(converted_array.mean()) + 1e-8)
+        
+        print(f"    Normalized weight range: {weight_range:.3f}")
+        print(f"    Normalized variance/mean ratio: {variance_ratio:.3f}")
+        
+        normalization_success = []
+        if weight_range <= 20:  # Should be much smaller after normalization
+            normalization_success.append("Good weight range")
+        if variance_ratio <= 20:  # Should be reduced
+            normalization_success.append("Controlled variance")
+        if all(abs(w) <= 10 for w in converted_weights):  # No extreme outliers
+            normalization_success.append("No extreme outliers")
+        
+        if len(normalization_success) >= 2:
+            print(f"    ✅ Normalization effective: {', '.join(normalization_success)}")
+        else:
+            print(f"    ⚠️  Normalization may need adjustment")
+            edge_issues += 1
+        
+        # Compare original vs normalized to show preservation of semantic information
+        if original_weights and len(original_weights) == len(converted_weights):
+            orig_neg_ratio = sum(1 for w in original_weights if w < 0) / len(original_weights)
+            conv_neg_ratio = negative_converted / len(converted_weights)
+            
+            print(f"    Sign preservation: Original {orig_neg_ratio:.1%} negative → Converted {conv_neg_ratio:.1%} negative")
+            
+            if abs(orig_neg_ratio - conv_neg_ratio) < 0.01:  # Within 1%
+                print(f"    ✅ Semantic information (sign) well preserved")
+            else:
+                print(f"    ⚠️  Some semantic information may be lost")
+                edge_issues += 1
+    
+    # Check edge attribute tensor shape and dtype
+    print(f"  Edge attribute tensor analysis:")
+    print(f"    Shape: {pyg_data.edge_attr.shape}")
+    print(f"    Dtype: {pyg_data.edge_attr.dtype}")
+    print(f"    Requires grad: {pyg_data.edge_attr.requires_grad}")
+    
+    # Sample a few edge weights to verify conversion accuracy
+    print(f"  Edge weight conversion verification:")
+    verified_edges = 0
+    for i, edge in enumerate(original_edges[:5]):  # Check first 5 edges
+        source_id = edge.get('source')
+        target_id = edge.get('target')
+        
+        if source_id in node_id_to_idx and target_id in node_id_to_idx:
+            expected_src = node_id_to_idx[source_id]
+            expected_dst = node_id_to_idx[target_id]
+            expected_weight = float(edge.get('weight', edge.get('value', 1.0)))
+            
+            # Find corresponding edge in PyG data
+            for j in range(pyg_data.edge_index.shape[1]):
+                src_idx, dst_idx = pyg_data.edge_index[:, j]
+                if src_idx == expected_src and dst_idx == expected_dst:
+                    actual_weight = pyg_data.edge_attr[j].item()
+                    weight_diff = abs(actual_weight - expected_weight)
+                    
+                    if weight_diff < 1e-6:
+                        print(f"    ✅ Edge {i}: {source_id}->{target_id}, weight {actual_weight:.6f}")
+                        verified_edges += 1
+                    else:
+                        print(f"    ❌ Edge {i}: {source_id}->{target_id}, expected {expected_weight:.6f}, got {actual_weight:.6f} (diff: {weight_diff:.6f})")
+                        edge_issues += 1
+                    break
+    
+    return edge_issues == 0
+
+
 def verify_feature_conversion(json_file_path, converter, label):
     """Verify that features are correctly converted from JSON to PyG"""
     json_file_path = str(json_file_path)
@@ -123,7 +278,7 @@ def verify_feature_conversion(json_file_path, converter, label):
         return False
     
     # Verify features for first few nodes
-    print(f"\n🔍 Verifying features for first 3 nodes:")
+    print(f"\n🔍 Verifying node features for first 3 nodes:")
     feature_names = converter.feature_names
     
     mismatches = 0
@@ -147,7 +302,7 @@ def verify_feature_conversion(json_file_path, converter, label):
             else:
                 print(f"    ✅ {fname}: {actual}")
     
-    # Test edge preservation
+    # Test edge preservation and validation
     print(f"\n🔍 Verifying edge conversion:")
     original_edges = original_graph.get('links', original_graph.get('edges', []))
     
@@ -173,18 +328,20 @@ def verify_feature_conversion(json_file_path, converter, label):
     else:
         print(f"    ✅ Edge count matches")
     
-    # Verify a few edge weights
+    # Enhanced edge validation
     if pyg_data.edge_index.shape[1] > 0:
-        print(f"  Sample edge weights:")
-        for i in range(min(3, pyg_data.edge_index.shape[1])):
-            edge_weight = pyg_data.edge_attr[i].item()
-            print(f"    Edge {i}: weight = {edge_weight}")
+        edge_validation_passed = verify_edge_attributes_detailed(original_edges, pyg_data, node_id_to_idx)
+        if not edge_validation_passed:
+            mismatches += 1
+    else:
+        print(f"    ❌ Graph has no edges! This should not happen for attribution graphs.")
+        mismatches += 1
     
     if mismatches == 0:
-        print(f"\n✅ All feature verifications passed!")
+        print(f"\n✅ All feature and edge verifications passed!")
         return True
     else:
-        print(f"\n❌ Found {mismatches} feature mismatches!")
+        print(f"\n❌ Found {mismatches} validation issues!")
         return False
 
 

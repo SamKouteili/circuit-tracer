@@ -222,7 +222,9 @@ class PromptInjectionGraphGPS(nn.Module):
         
         # Apply GraphGPS layers
         # Extract edge weights from edge_attr if provided
-        edge_weight = edge_attr[:, 0] if edge_attr is not None and edge_attr.size(1) > 0 else None
+        edge_weight = None
+        if edge_attr is not None and edge_attr.numel() > 0 and edge_attr.size(1) > 0:
+            edge_weight = edge_attr[:, 0]
         
         for layer in self.gps_layers:
             x = layer(x, edge_index, batch, edge_weight)
