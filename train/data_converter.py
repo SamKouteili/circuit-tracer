@@ -150,16 +150,31 @@ class AttributionGraphConverter:
         # Separate the feature field by type to avoid mixed semantics
         if feature_type == 'cross layer transcoder':
             # Normalize feature index to reasonable range
-            features.append(float(feature_val) /
-                            1000.0 if feature_val is not None else 0.0)
+            if feature_val is not None:
+                normalized_val = float(feature_val) / 1000.0
+                # Ensure no extreme values that could cause NaN
+                normalized_val = max(min(normalized_val, 100.0), -100.0)
+                features.append(normalized_val)
+            else:
+                features.append(0.0)
         elif feature_type == 'embedding':
             # Token position - keep as is (small values)
-            features.append(float(feature_val)
-                            if feature_val is not None else 0.0)
+            if feature_val is not None:
+                val = float(feature_val)
+                # Clamp to reasonable range
+                val = max(min(val, 10000.0), -10000.0)
+                features.append(val)
+            else:
+                features.append(0.0)
         elif feature_type == 'logit':
             # Vocabulary ID - normalize to reasonable range
-            features.append(float(feature_val) /
-                            10000.0 if feature_val is not None else 0.0)
+            if feature_val is not None:
+                normalized_val = float(feature_val) / 10000.0
+                # Ensure no extreme values
+                normalized_val = max(min(normalized_val, 100.0), -100.0)
+                features.append(normalized_val)
+            else:
+                features.append(0.0)
         else:
             # Error nodes or unknown - set to 0
             features.append(0.0)
@@ -219,12 +234,27 @@ class AttributionGraphConverter:
             print(f"Warning: No valid nodes found in JSON string")
             return None
 
-        # Convert to tensor
+        # Convert to tensor with NaN checking
         x = torch.tensor(node_features, dtype=torch.float)
+        
+        # CRITICAL: Check for NaN/Inf in node features
+        if torch.isnan(x).any():
+            nan_count = torch.isnan(x).sum().item()
+            print(f"🚨 CRITICAL: Found {nan_count} NaN values in node features!")
+            # Replace NaN with zeros
+            x = torch.nan_to_num(x, nan=0.0)
+            
+        if torch.isinf(x).any():
+            inf_count = torch.isinf(x).sum().item()
+            print(f"🚨 CRITICAL: Found {inf_count} Inf values in node features!")
+            # Replace Inf with finite values
+            x = torch.nan_to_num(x, posinf=100.0, neginf=-100.0)
 
-        # Extract edges
+        # Extract edges - CRITICAL: Skip edges connecting to error nodes
         edge_indices = []
         edge_weights = []
+        skipped_edges = 0
+        invalid_weight_edges = 0
 
         for link in links:
             if 'source' not in link or 'target' not in link:
@@ -232,21 +262,43 @@ class AttributionGraphConverter:
 
             source_id = link['source']
             target_id = link['target']
+            
+            # Skip edges that connect to error nodes (which we filtered out)
+            # This is crucial for consistency between nodes and edges
+            if source_id not in node_mapping or target_id not in node_mapping:
+                skipped_edges += 1
+                continue
 
-            # Only include edges where both nodes exist in our node set
-            if source_id in node_mapping and target_id in node_mapping:
-                source_idx = node_mapping[source_id]
-                target_idx = node_mapping[target_id]
+            source_idx = node_mapping[source_id]
+            target_idx = node_mapping[target_id]
 
-                edge_indices.append([source_idx, target_idx])
-                weight = link.get('weight', 1.0)
-                weight = float(weight if weight is not None else 1.0)
-                # Ensure weight is valid (not NaN/Inf)
-                if not torch.isfinite(torch.tensor(weight)):
-                    print(
-                        f"Warning: Invalid weight {weight} for edge {source_id}->{target_id}, setting to 1.0")
-                    weight = 1.0
-                edge_weights.append(weight)
+            # Extract and validate edge weight
+            weight = link.get('weight', 1.0)
+            
+            # Handle None weights
+            if weight is None:
+                weight = 1.0
+            
+            try:
+                weight = float(weight)
+            except (ValueError, TypeError):
+                print(f"Warning: Non-numeric weight {weight} for edge {source_id}->{target_id}, setting to 1.0")
+                weight = 1.0
+                invalid_weight_edges += 1
+            
+            # Check for NaN/Inf weights
+            if not (torch.isfinite(torch.tensor(weight)) and not torch.isnan(torch.tensor(weight))):
+                print(f"Warning: Invalid weight {weight} for edge {source_id}->{target_id}, setting to 1.0")
+                weight = 1.0
+                invalid_weight_edges += 1
+
+            edge_indices.append([source_idx, target_idx])
+            edge_weights.append(weight)
+        
+        # Report edge filtering statistics for debugging
+        total_original_edges = len(links)
+        valid_edges = len(edge_indices)
+        print(f"Edge processing: {total_original_edges} original → {valid_edges} valid ({skipped_edges} skipped, {invalid_weight_edges} had invalid weights)")
 
         # Convert edges to tensor format [2, num_edges]
         if edge_indices:
@@ -256,8 +308,26 @@ class AttributionGraphConverter:
             # CRITICAL: Apply proper edge weight normalization for training stability
             # Based on analysis: weights range from -91 to +101, need to normalize while preserving semantics
             raw_weights = torch.tensor(edge_weights, dtype=torch.float)
-            normalized_weights = self._normalize_edge_weights_for_training(
-                raw_weights)
+            
+            # Check for NaN/Inf in raw edge weights
+            if torch.isnan(raw_weights).any():
+                nan_count = torch.isnan(raw_weights).sum().item()
+                print(f"🚨 CRITICAL: Found {nan_count} NaN values in raw edge weights!")
+                raw_weights = torch.nan_to_num(raw_weights, nan=1.0)
+            
+            if torch.isinf(raw_weights).any():
+                inf_count = torch.isinf(raw_weights).sum().item()
+                print(f"🚨 CRITICAL: Found {inf_count} Inf values in raw edge weights!")
+                raw_weights = torch.nan_to_num(raw_weights, posinf=10.0, neginf=-10.0)
+            
+            normalized_weights = self._normalize_edge_weights_for_training(raw_weights)
+            
+            # Final check after normalization
+            if torch.isnan(normalized_weights).any():
+                nan_count = torch.isnan(normalized_weights).sum().item()
+                print(f"🚨 CRITICAL: Found {nan_count} NaN values in normalized edge weights!")
+                normalized_weights = torch.nan_to_num(normalized_weights, nan=1.0)
+            
             edge_attr = normalized_weights.unsqueeze(1)
         else:
             # Create empty edge tensors for graphs with no edges
@@ -316,6 +386,7 @@ class AttributionGraphConverter:
         - Need to preserve sign and relative magnitudes while preventing gradient explosion
 
         Uses simple clamping to preserve linear relationships between weights.
+        Negative weights are preserved as they have semantic meaning (inhibitory influences).
         """
         if len(weights) == 0:
             return weights

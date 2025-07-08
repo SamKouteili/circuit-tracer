@@ -78,6 +78,127 @@ def inspect_raw_graph(json_file_path):
                 print(f"Edge weights: min={min(weights):.4f}, max={max(weights):.4f}, mean={np.mean(weights):.4f}")
 
 
+def deep_nan_detection(pyg_data):
+    """Comprehensive NaN detection in PyG data"""
+    print(f"\n🕵️ Deep NaN Detection Analysis:")
+    
+    nan_issues = 0
+    
+    # Check node features
+    if hasattr(pyg_data, 'x') and pyg_data.x is not None:
+        x = pyg_data.x
+        node_nan_mask = torch.isnan(x)
+        node_inf_mask = torch.isinf(x)
+        
+        total_nan_features = node_nan_mask.sum().item()
+        total_inf_features = node_inf_mask.sum().item()
+        
+        print(f"  Node features ({x.shape}):")
+        print(f"    NaN values: {total_nan_features}")
+        print(f"    Inf values: {total_inf_features}")
+        
+        if total_nan_features > 0:
+            nan_per_feature = node_nan_mask.sum(dim=0)
+            for i, count in enumerate(nan_per_feature):
+                if count > 0:
+                    print(f"    Feature {i}: {count} NaN values")
+            nan_issues += 1
+        
+        if total_inf_features > 0:
+            inf_per_feature = node_inf_mask.sum(dim=0)
+            for i, count in enumerate(inf_per_feature):
+                if count > 0:
+                    print(f"    Feature {i}: {count} Inf values")
+            nan_issues += 1
+        
+        # Check for extreme values that might cause overflow
+        extreme_large = (torch.abs(x) > 1000).sum().item()
+        if extreme_large > 0:
+            print(f"    ⚠️  {extreme_large} features with |value| > 1000")
+            nan_issues += 1
+    
+    # Check edge attributes
+    if hasattr(pyg_data, 'edge_attr') and pyg_data.edge_attr is not None:
+        edge_attr = pyg_data.edge_attr
+        edge_nan_mask = torch.isnan(edge_attr)
+        edge_inf_mask = torch.isinf(edge_attr)
+        
+        total_nan_edges = edge_nan_mask.sum().item()
+        total_inf_edges = edge_inf_mask.sum().item()
+        
+        print(f"  Edge attributes ({edge_attr.shape}):")
+        print(f"    NaN values: {total_nan_edges}")
+        print(f"    Inf values: {total_inf_edges}")
+        
+        if total_nan_edges > 0:
+            print(f"    🚨 CRITICAL: Found NaN edge weights!")
+            # Show which edges have NaN
+            nan_edge_indices = edge_nan_mask.nonzero(as_tuple=False)
+            print(f"    NaN edge locations: {nan_edge_indices[:5]}")  # Show first 5
+            nan_issues += 1
+        
+        if total_inf_edges > 0:
+            print(f"    🚨 CRITICAL: Found Inf edge weights!")
+            inf_edge_indices = edge_inf_mask.nonzero(as_tuple=False)
+            print(f"    Inf edge locations: {inf_edge_indices[:5]}")  # Show first 5
+            nan_issues += 1
+        
+        # Check edge attribute statistics
+        if edge_attr.numel() > 0:
+            edge_flat = edge_attr.flatten()
+            print(f"    Edge weight range: [{edge_flat.min():.6f}, {edge_flat.max():.6f}]")
+            print(f"    Edge weight mean: {edge_flat.mean():.6f}")
+            print(f"    Edge weight std: {edge_flat.std():.6f}")
+            
+            # Check for problematic gradients
+            gradient_risk = edge_flat.std() / (abs(edge_flat.mean()) + 1e-8)
+            if gradient_risk > 100:
+                print(f"    ⚠️  High gradient explosion risk: std/mean = {gradient_risk:.2f}")
+                nan_issues += 1
+    
+    # Check edge indices
+    if hasattr(pyg_data, 'edge_index') and pyg_data.edge_index is not None:
+        edge_index = pyg_data.edge_index
+        print(f"  Edge indices ({edge_index.shape}):")
+        
+        if edge_index.numel() > 0:
+            max_node_idx = edge_index.max().item()
+            min_node_idx = edge_index.min().item()
+            num_nodes = pyg_data.num_nodes if hasattr(pyg_data, 'num_nodes') else pyg_data.x.shape[0]
+            
+            print(f"    Node index range: [{min_node_idx}, {max_node_idx}]")
+            print(f"    Expected node range: [0, {num_nodes-1}]")
+            
+            # Check for invalid node indices
+            invalid_indices = (edge_index >= num_nodes) | (edge_index < 0)
+            if invalid_indices.any():
+                print(f"    🚨 CRITICAL: Found invalid node indices!")
+                print(f"    Invalid count: {invalid_indices.sum().item()}")
+                nan_issues += 1
+    
+    # Check labels
+    if hasattr(pyg_data, 'y') and pyg_data.y is not None:
+        y = pyg_data.y
+        y_nan = torch.isnan(y).sum().item()
+        y_inf = torch.isinf(y).sum().item()
+        
+        print(f"  Labels ({y.shape}):")
+        print(f"    NaN values: {y_nan}")
+        print(f"    Inf values: {y_inf}")
+        print(f"    Label values: {y.unique().tolist()}")
+        
+        if y_nan > 0 or y_inf > 0:
+            print(f"    🚨 CRITICAL: Invalid labels found!")
+            nan_issues += 1
+    
+    if nan_issues == 0:
+        print(f"  ✅ No NaN/Inf issues detected")
+    else:
+        print(f"  🚨 Found {nan_issues} critical issues that could cause NaN loss!")
+    
+    return nan_issues == 0
+
+
 def verify_edge_attributes_detailed(original_edges, pyg_data, node_id_to_idx):
     """Comprehensive edge attribute validation with normalization analysis"""
     print(f"\n🔍 Detailed Edge Attribute Analysis:")
@@ -328,6 +449,11 @@ def verify_feature_conversion(json_file_path, converter, label):
     else:
         print(f"    ✅ Edge count matches")
     
+    # CRITICAL: Deep NaN detection first
+    nan_detection_passed = deep_nan_detection(pyg_data)
+    if not nan_detection_passed:
+        mismatches += 1
+
     # Enhanced edge validation
     if pyg_data.edge_index.shape[1] > 0:
         edge_validation_passed = verify_edge_attributes_detailed(original_edges, pyg_data, node_id_to_idx)

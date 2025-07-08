@@ -5,7 +5,7 @@ GraphGPS model implementation for prompt injection detection
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, global_mean_pool, global_max_pool, global_add_pool
+from torch_geometric.nn import GCNConv, global_mean_pool, global_max_pool, global_add_pool, MessagePassing, GINEConv
 from torch_geometric.utils import degree
 from typing import Optional
 import math
@@ -111,17 +111,55 @@ class MultiHeadAttention(nn.Module):
         
         return output
 
+class GPSLocalMPNN(nn.Module):
+    """GPS-compliant local MPNN using GINE (Graph Isomorphism Network Extended)"""
+    
+    def __init__(self, hidden_dim: int, edge_dim: int = 1):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.edge_dim = edge_dim
+        
+        # Edge encoder to transform edge features to hidden dimension
+        self.edge_encoder = nn.Sequential(
+            nn.Linear(edge_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        
+        # GINE layer - proper GPS local MPNN
+        # GINE handles edge features naturally and supports negative values
+        node_nn = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.ReLU(), 
+            nn.Linear(hidden_dim * 2, hidden_dim)
+        )
+        
+        self.gine = GINEConv(node_nn, edge_dim=hidden_dim)
+        
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # Handle missing edge attributes
+        if edge_attr is None:
+            edge_attr = torch.zeros(edge_index.shape[1], self.edge_dim, device=x.device, dtype=x.dtype)
+        
+        # Encode edge features to hidden dimension
+        edge_attr_encoded = self.edge_encoder(edge_attr)
+        
+        # GINE forward pass - handles negative edge features naturally
+        out = self.gine(x, edge_index, edge_attr_encoded)
+        
+        return out
+
 class GraphGPSLayer(nn.Module):
     """Single GraphGPS layer combining local + global attention"""
     
-    def __init__(self, hidden_dim: int, num_heads: int = 8, dropout: float = 0.1):
+    def __init__(self, hidden_dim: int, num_heads: int = 8, dropout: float = 0.1, edge_dim: int = 1):
         super().__init__()
         self.hidden_dim = hidden_dim
         
-        # Local message passing (GCN)
-        self.local_gnn = GCNConv(hidden_dim, hidden_dim)
+        # Local message passing using GPS-compliant GINE
+        self.local_gnn = GPSLocalMPNN(hidden_dim, edge_dim)
         
-        # Global multi-head attention
+        # Global multi-head attention (ignores edges as per GPS design)
         self.global_attention = MultiHeadAttention(hidden_dim, num_heads, dropout)
         
         # Feed forward network
@@ -139,12 +177,12 @@ class GraphGPSLayer(nn.Module):
         
         self.dropout = nn.Dropout(dropout)
         
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor, batch: torch.Tensor, edge_weight: Optional[torch.Tensor] = None) -> torch.Tensor:
-        # 1. Local message passing with residual connection
-        x_local = self.local_gnn(x, edge_index, edge_weight)
+    def forward(self, x: torch.Tensor, edge_index: torch.Tensor, batch: torch.Tensor, edge_attr: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # 1. Local message passing with edge attributes
+        x_local = self.local_gnn(x, edge_index, edge_attr)
         x = self.norm1(x + self.dropout(x_local))
         
-        # 2. Global attention with residual connection
+        # 2. Global attention (ignores edges completely)
         x_global = self.global_attention(x, batch)
         x = self.norm2(x + self.dropout(x_global))
         
@@ -194,7 +232,7 @@ class PromptInjectionGraphGPS(nn.Module):
         
         # GraphGPS layers
         self.gps_layers = nn.ModuleList([
-            GraphGPSLayer(hidden_dim, num_heads, dropout)
+            GraphGPSLayer(hidden_dim, num_heads, dropout, edge_dim=1)
             for _ in range(num_layers)
         ])
         
@@ -221,13 +259,8 @@ class PromptInjectionGraphGPS(nn.Module):
         x = self.pos_encoder(x, edge_index, batch)
         
         # Apply GraphGPS layers
-        # Extract edge weights from edge_attr if provided
-        edge_weight = None
-        if edge_attr is not None and edge_attr.numel() > 0 and edge_attr.size(1) > 0:
-            edge_weight = edge_attr[:, 0]
-        
         for layer in self.gps_layers:
-            x = layer(x, edge_index, batch, edge_weight)
+            x = layer(x, edge_index, batch, edge_attr)
         
         # Graph-level readout
         graph_embedding = self.readout(x, batch)
