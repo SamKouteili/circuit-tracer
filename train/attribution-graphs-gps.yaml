@@ -7,7 +7,7 @@ wandb:
 dataset:
   format: attribution_graphs
   name: prompt_injection
-  dir: ../data_small  # Path to our dataset
+  dir: /home/sk2959/palmer_scratch/data  # Path to our dataset
   task: graph
   task_type: classification
   transductive: False
